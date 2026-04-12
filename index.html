@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Arc Cascade</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero-panel">
+        <p class="eyebrow">Canvas Arcade</p>
+        <h1>Arc Cascade</h1>
+        <p class="hero-copy">
+          Line up the angle, unleash the volley, and survive one more row.
+        </p>
+        <div class="stat-grid">
+          <article class="stat-card">
+            <span class="stat-label">Round</span>
+            <strong id="roundValue">1</strong>
+          </article>
+          <article class="stat-card">
+            <span class="stat-label">Balls</span>
+            <strong id="ballsValue">1</strong>
+          </article>
+          <article class="stat-card">
+            <span class="stat-label">Score</span>
+            <strong id="scoreValue">0</strong>
+          </article>
+          <article class="stat-card">
+            <span class="stat-label">Best</span>
+            <strong id="bestValue">0</strong>
+          </article>
+        </div>
+        <div class="controls">
+          <button id="restartButton" class="primary-button" type="button">
+            Restart Run
+          </button>
+          <label class="sound-toggle">
+            <input id="soundToggle" type="checkbox" />
+            Sound Hooks
+          </label>
+        </div>
+        <p id="statusText" class="status-text">
+          Drag on the arena to aim. Release to fire.
+        </p>
+      </section>
+
+      <section class="game-panel">
+        <button
+          id="speedButton"
+          class="speed-button is-hidden"
+          type="button"
+        >
+          2x Speed
+        </button>
+        <canvas
+          id="gameCanvas"
+          width="720"
+          height="960"
+          aria-label="Arc Cascade game arena"
+        ></canvas>
+      </section>
+    </main>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
