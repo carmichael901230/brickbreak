@@ -169,6 +169,23 @@ test("dragging downward hides the guide and cancels the shot", () => {
   assert.equal(state.launchDirection, null);
 });
 
+test("aim guide length is capped by the space above the launcher", () => {
+  const game = createGameController({
+    boardGenerator: createRoundSequence([
+      { blocks: [], pickups: [] },
+      { blocks: [], pickups: [] }
+    ]),
+    audioBus: createSilentAudioBus()
+  });
+
+  game.startAim({ x: 360, y: 800 });
+  game.updateAim({ x: -1000, y: 3000 });
+
+  const state = game.getState();
+  const guideLength = Math.hypot(state.aimPoint.x - state.launcherX, state.aimPoint.y - state.arena.launcherY);
+  assert.ok(guideLength <= state.arena.launcherY - GAME_CONFIG.topPadding + 0.001);
+});
+
 test("destroyed bricks are removed before the volley ends", () => {
   const customConfig = {
     ...GAME_CONFIG,

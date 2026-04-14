@@ -1,6 +1,19 @@
 import { GAME_CONFIG } from "./config.js";
 import { clampLaunchDirection, reflectBall, resolveBallBlockCollision } from "./physics.js";
 
+function limitVectorLength(vector, maxLength) {
+  const length = Math.hypot(vector.x, vector.y);
+  if (length === 0 || length <= maxLength) {
+    return vector;
+  }
+
+  const scale = maxLength / length;
+  return {
+    x: vector.x * scale,
+    y: vector.y * scale
+  };
+}
+
 function buildArena(config) {
   const playableWidth = config.width - config.sidePadding * 2;
   const blockSize =
@@ -81,10 +94,12 @@ export function createGameController({
       x: (point.x - gameState.aimDragOrigin.x) * config.aimSensitivity,
       y: (point.y - gameState.aimDragOrigin.y) * config.aimSensitivity
     };
-    const launchVector = {
+    const rawLaunchVector = {
       x: -dragVector.x,
       y: -dragVector.y
     };
+    const maxGuideLength = gameState.arena.launcherY - config.topPadding;
+    const launchVector = limitVectorLength(rawLaunchVector, maxGuideLength);
     const canFire = launchVector.y < -18;
 
     return {
