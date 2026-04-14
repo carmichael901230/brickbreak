@@ -110,9 +110,9 @@ test("round resolves after all balls return and applies collected pickups", () =
     audioBus: createSilentAudioBus()
   });
 
-  game.startAim({ x: 360, y: 800 });
-  game.updateAim({ x: 500, y: 300 });
-  game.releaseAim({ x: 500, y: 300 });
+  game.startAim({ x: 360, y: 400 });
+  game.updateAim({ x: 220, y: 920 });
+  game.releaseAim({ x: 220, y: 920 });
 
   for (let index = 0; index < 500; index += 1) {
     game.update(0.016);
@@ -122,6 +122,51 @@ test("round resolves after all balls return and applies collected pickups", () =
   assert.equal(state.round, 2);
   assert.ok(state.ballsOwned >= 1);
   assert.equal(state.state, "aiming");
+});
+
+test("releaseAim fires opposite to the drag direction", () => {
+  const customConfig = {
+    ...GAME_CONFIG,
+    ballSpeed: 100,
+    launchInterval: 0.01,
+    settleThreshold: 5000,
+    height: 5200
+  };
+  const game = createGameController({
+    config: customConfig,
+    boardGenerator: createRoundSequence([
+      { blocks: [], pickups: [] },
+      { blocks: [], pickups: [] }
+    ]),
+    audioBus: createSilentAudioBus()
+  });
+
+  game.startAim({ x: 360, y: 800 });
+  game.updateAim({ x: 300, y: 960 });
+  game.releaseAim({ x: 300, y: 960 });
+
+  const state = game.getState();
+  assert.ok(state.launchDirection.x > 0);
+  assert.ok(state.launchDirection.y < 0);
+});
+
+test("dragging downward hides the guide and cancels the shot", () => {
+  const game = createGameController({
+    boardGenerator: createRoundSequence([
+      { blocks: [], pickups: [] },
+      { blocks: [], pickups: [] }
+    ]),
+    audioBus: createSilentAudioBus()
+  });
+
+  game.startAim({ x: 360, y: 500 });
+  game.updateAim({ x: 360, y: 360 });
+  assert.equal(game.getState().aimPoint, null);
+
+  game.releaseAim({ x: 360, y: 360 });
+  const state = game.getState();
+  assert.equal(state.state, "aiming");
+  assert.equal(state.launchDirection, null);
 });
 
 test("destroyed bricks are removed before the volley ends", () => {
@@ -146,9 +191,9 @@ test("destroyed bricks are removed before the volley ends", () => {
     audioBus: createSilentAudioBus()
   });
 
-  game.startAim({ x: 80, y: 1100 });
-  game.updateAim({ x: 80, y: 120 });
-  game.releaseAim({ x: 80, y: 120 });
+  game.startAim({ x: 80, y: 120 });
+  game.updateAim({ x: 80, y: 1100 });
+  game.releaseAim({ x: 80, y: 1100 });
 
   for (let index = 0; index < 70; index += 1) {
     game.update(0.016);
@@ -176,9 +221,9 @@ test("speed up becomes available after the configured delay and doubles velocity
     audioBus: createSilentAudioBus()
   });
 
-  game.startAim({ x: 360, y: 3900 });
-  game.updateAim({ x: 520, y: 300 });
-  game.releaseAim({ x: 520, y: 300 });
+  game.startAim({ x: 360, y: 500 });
+  game.updateAim({ x: 200, y: 3900 });
+  game.releaseAim({ x: 200, y: 3900 });
 
   for (let index = 0; index < 12; index += 1) {
     game.update(0.016);

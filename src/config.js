@@ -11,6 +11,7 @@ export const GAME_CONFIG = {
   collisionPadding: 5,
   ballRadius: 8,
   ballSpeed: 860,
+  aimSensitivity: 1.75,
   speedUpMultiplier: 2,
   speedUpDelay: 5,
   launchInterval: 0.06,
@@ -21,7 +22,7 @@ export const GAME_CONFIG = {
   failLineOffset: 110,
   spawn: {
     minBlocks: 2,
-    maxBlocks: 4,
+    maxBlocks: 5,
     blockChanceRamp: 0.025,
     pickupChance: 0.72,
     guaranteedPickupRounds: 2

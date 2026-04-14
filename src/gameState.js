@@ -50,6 +50,7 @@ export function createInitialGameState(config = GAME_CONFIG) {
     launcherX: config.width / 2,
     launcherTargetX: config.width / 2,
     aiming: false,
+    aimDragOrigin: null,
     aimPoint: null,
     launchDirection: null,
     launchCooldown: 0,
@@ -74,6 +75,29 @@ export function createGameController({
   audioBus
 }) {
   let gameState = createInitialGameState(config);
+
+  function resolveAimPreview(point) {
+    const dragVector = {
+      x: (point.x - gameState.aimDragOrigin.x) * config.aimSensitivity,
+      y: (point.y - gameState.aimDragOrigin.y) * config.aimSensitivity
+    };
+    const launchVector = {
+      x: -dragVector.x,
+      y: -dragVector.y
+    };
+    const canFire = launchVector.y < -18;
+
+    return {
+      canFire,
+      aimPoint: canFire
+        ? {
+            x: gameState.launcherX + launchVector.x,
+            y: gameState.arena.launcherY + launchVector.y
+          }
+        : null,
+      launchVector
+    };
+  }
 
   function resetRoundEntities() {
     // A round reset re-seeds all launcher-related state while preserving score and board progress.
@@ -137,7 +161,11 @@ export function createGameController({
     }
 
     gameState.aiming = true;
-    gameState.aimPoint = point;
+    gameState.aimDragOrigin = point;
+    gameState.aimPoint = {
+      x: gameState.launcherX,
+      y: gameState.arena.launcherY - 80
+    };
   }
 
   function updateAim(point) {
@@ -145,7 +173,8 @@ export function createGameController({
       return;
     }
 
-    gameState.aimPoint = point;
+    const preview = resolveAimPreview(point);
+    gameState.aimPoint = preview.aimPoint;
   }
 
   function releaseAim(point) {
@@ -154,13 +183,12 @@ export function createGameController({
     }
 
     gameState.aiming = false;
-    gameState.aimPoint = point;
-    const vector = {
-      x: point.x - gameState.launcherX,
-      y: point.y - gameState.arena.launcherY
-    };
+    const preview = resolveAimPreview(point);
+    gameState.aimPoint = preview.aimPoint;
+    const vector = preview.launchVector;
+    gameState.aimDragOrigin = null;
 
-    if (vector.y > -18) {
+    if (!preview.canFire) {
       gameState.aimPoint = null;
       return;
     }

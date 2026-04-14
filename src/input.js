@@ -1,24 +1,28 @@
-export function createInputController(canvas, controller, statusUpdater) {
+export function createInputController(surface, canvas, controller, statusUpdater) {
   let pointerActive = false;
 
   function getPoint(event) {
     const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width / (globalThis.devicePixelRatio || 1);
-    const scaleY = canvas.height / rect.height / (globalThis.devicePixelRatio || 1);
+    const scaleX = 720 / rect.width;
+    const scaleY = 960 / rect.height;
     return {
       x: (event.clientX - rect.left) * scaleX,
       y: (event.clientY - rect.top) * scaleY
     };
   }
 
-  canvas.addEventListener("pointerdown", (event) => {
+  surface.addEventListener("pointerdown", (event) => {
+    if (event.target.closest("button, input, label")) {
+      return;
+    }
+
     pointerActive = true;
-    canvas.setPointerCapture(event.pointerId);
+    surface.setPointerCapture(event.pointerId);
     controller.startAim(getPoint(event));
-    statusUpdater("Aim high and release to fire.");
+    statusUpdater("Pull anywhere on the screen, then release to fire.");
   });
 
-  canvas.addEventListener("pointermove", (event) => {
+  surface.addEventListener("pointermove", (event) => {
     if (!pointerActive) {
       return;
     }
@@ -35,9 +39,9 @@ export function createInputController(canvas, controller, statusUpdater) {
     controller.releaseAim(getPoint(event));
   }
 
-  canvas.addEventListener("pointerup", release);
-  canvas.addEventListener("pointercancel", release);
-  canvas.addEventListener("pointerleave", (event) => {
+  surface.addEventListener("pointerup", release);
+  surface.addEventListener("pointercancel", release);
+  surface.addEventListener("pointerleave", (event) => {
     if (pointerActive && event.buttons === 0) {
       release(event);
     }

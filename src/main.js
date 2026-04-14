@@ -6,15 +6,26 @@ import { createInputController } from "./input.js";
 import { createRenderer } from "./render.js";
 import { createStorageAdapter } from "./storage.js";
 
+const mainMenu = document.querySelector("#mainMenu");
+const gameScreen = document.querySelector("#gameScreen");
 const canvas = document.querySelector("#gameCanvas");
+const playButton = document.querySelector("#playButton");
+const pauseButton = document.querySelector("#pauseButton");
 const roundValue = document.querySelector("#roundValue");
-const ballsValue = document.querySelector("#ballsValue");
-const scoreValue = document.querySelector("#scoreValue");
 const bestValue = document.querySelector("#bestValue");
 const statusText = document.querySelector("#statusText");
-const restartButton = document.querySelector("#restartButton");
 const soundToggle = document.querySelector("#soundToggle");
 const speedButton = document.querySelector("#speedButton");
+const pauseOverlay = document.querySelector("#pauseOverlay");
+const settingsOverlay = document.querySelector("#settingsOverlay");
+const gameOverOverlay = document.querySelector("#gameOverOverlay");
+const resumeButton = document.querySelector("#resumeButton");
+const backToMenuButton = document.querySelector("#backToMenuButton");
+const openSettingsButton = document.querySelector("#openSettingsButton");
+const closeSettingsButton = document.querySelector("#closeSettingsButton");
+const restartRunButton = document.querySelector("#restartRunButton");
+const gameOverMenuButton = document.querySelector("#gameOverMenuButton");
+const gameOverSummary = document.querySelector("#gameOverSummary");
 
 const storage = createStorageAdapter();
 const settings = storage.loadSettings();
@@ -33,9 +44,28 @@ const game = createGameController({
   audioBus
 });
 const renderer = createRenderer(canvas, GAME_CONFIG);
+let appScreen = "menu";
+let overlayScreen = null;
 
 function setStatus(message) {
   statusText.textContent = message;
+}
+
+function toggleElement(element, shouldShow) {
+  element.classList.toggle("is-hidden", !shouldShow);
+  element.setAttribute("aria-hidden", String(!shouldShow));
+}
+
+function syncScreenState() {
+  toggleElement(mainMenu, appScreen === "menu");
+  toggleElement(gameScreen, appScreen === "game");
+  toggleElement(pauseOverlay, overlayScreen === "pause");
+  toggleElement(settingsOverlay, overlayScreen === "settings");
+  toggleElement(gameOverOverlay, overlayScreen === "gameover");
+}
+
+function isSimulationPaused() {
+  return appScreen !== "game" || overlayScreen !== null;
 }
 
 function refreshBestScore() {
@@ -50,10 +80,9 @@ function refreshBestScore() {
 function syncHud() {
   const state = game.getState();
   roundValue.textContent = String(state.round);
-  ballsValue.textContent = String(state.ballsOwned);
-  scoreValue.textContent = String(state.score);
   bestValue.textContent = String(Math.max(storage.loadBestScore(), state.bestScore, state.score));
-  speedButton.classList.toggle("is-hidden", !state.speedUpAvailable);
+  speedButton.classList.toggle("is-hidden", !state.speedUpAvailable || isSimulationPaused());
+  gameOverSummary.textContent = `You made it to round ${state.round}.`;
 }
 
 function handleStatusMessages() {
@@ -76,12 +105,26 @@ function handleStatusMessages() {
   setStatus("Balls are resolving. Watch where the first return lands.");
 }
 
-createInputController(canvas, game, setStatus);
+createInputController(gameScreen, canvas, game, setStatus);
 
-restartButton.addEventListener("click", () => {
+function startRun() {
   game.restart();
+  appScreen = "game";
+  overlayScreen = null;
+  syncScreenState();
   syncHud();
   setStatus("Fresh run ready. Drag to line up the first shot.");
+}
+
+playButton.addEventListener("click", startRun);
+
+pauseButton.addEventListener("click", () => {
+  if (appScreen !== "game") {
+    return;
+  }
+
+  overlayScreen = "pause";
+  syncScreenState();
 });
 
 soundToggle.addEventListener("change", () => {
@@ -97,6 +140,37 @@ speedButton.addEventListener("click", () => {
   }
 });
 
+resumeButton.addEventListener("click", () => {
+  overlayScreen = null;
+  syncScreenState();
+});
+
+openSettingsButton.addEventListener("click", () => {
+  overlayScreen = "settings";
+  syncScreenState();
+});
+
+closeSettingsButton.addEventListener("click", () => {
+  overlayScreen = "pause";
+  syncScreenState();
+});
+
+backToMenuButton.addEventListener("click", () => {
+  overlayScreen = null;
+  appScreen = "menu";
+  syncScreenState();
+  syncHud();
+});
+
+restartRunButton.addEventListener("click", startRun);
+
+gameOverMenuButton.addEventListener("click", () => {
+  overlayScreen = null;
+  appScreen = "menu";
+  syncScreenState();
+  syncHud();
+});
+
 globalThis.addEventListener("resize", () => renderer.resize());
 
 let lastTime = performance.now();
@@ -104,14 +178,22 @@ function frame(now) {
   const deltaTime = (now - lastTime) / 1000;
   lastTime = now;
 
-  game.update(deltaTime);
+  if (!isSimulationPaused()) {
+    game.update(deltaTime);
+  }
   refreshBestScore();
   syncHud();
-  handleStatusMessages();
-  renderer.render(game.getState(), game.getEntityPosition);
+  if (appScreen === "game") {
+    if (game.getState().state === "gameover" && overlayScreen !== "gameover") {
+      overlayScreen = "gameover";
+      syncScreenState();
+    }
+    handleStatusMessages();
+    renderer.render(game.getState(), game.getEntityPosition);
+  }
   requestAnimationFrame(frame);
 }
 
+syncScreenState();
 syncHud();
-handleStatusMessages();
 requestAnimationFrame(frame);
