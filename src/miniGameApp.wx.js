@@ -23,7 +23,7 @@ const texts = {
   soundOff: "关",
   done: "完成",
   reachedRound: (round) => `你打到了第 ${round} 回合。`,
-  speed: "2x"
+  speed: "加速"
 };
 
 function clamp(value, min, max) {
