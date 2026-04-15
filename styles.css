@@ -6,7 +6,7 @@
   --muted: rgba(255, 255, 255, 0.72);
   --accent: #f2b400;
   --danger: #ff6f8e;
-  --phone-width: min(100vw, 430px);
+  --viewport-height: 100dvh;
   --safe-top: max(env(safe-area-inset-top), 12px);
   --safe-bottom: max(env(safe-area-inset-bottom), 14px);
   --font-display: "Trebuchet MS", "Avenir Next", sans-serif;
@@ -24,10 +24,11 @@ body {
 }
 
 body {
-  min-height: 100vh;
+  min-height: var(--viewport-height);
   background: linear-gradient(180deg, var(--bg-top), var(--bg-bottom));
   color: var(--text);
   font-family: var(--font-body);
+  overflow: hidden;
 }
 
 button,
@@ -36,8 +37,8 @@ input {
 }
 
 .app-shell {
-  width: var(--phone-width);
-  min-height: 100vh;
+  width: 100%;
+  min-height: var(--viewport-height);
   margin: 0 auto;
   position: relative;
   overflow: hidden;
@@ -45,7 +46,7 @@ input {
 
 .menu-screen,
 .game-screen {
-  min-height: 100vh;
+  min-height: var(--viewport-height);
 }
 
 .menu-screen {
@@ -91,15 +92,17 @@ input {
 .game-screen {
   display: flex;
   flex-direction: column;
-  padding: calc(10px + var(--safe-top)) 14px calc(18px + var(--safe-bottom));
-  gap: 14px;
+  width: min(100vw, 540px);
+  margin: 0 auto;
+  padding: calc(10px + var(--safe-top)) clamp(10px, 3vw, 16px) calc(14px + var(--safe-bottom));
+  gap: clamp(10px, 1.8vh, 16px);
 }
 
 .top-hud {
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: start;
-  gap: 10px;
+  gap: clamp(8px, 2vw, 12px);
 }
 
 .hud-left,
@@ -128,7 +131,7 @@ input {
 .score-block strong,
 .hud-center strong {
   display: block;
-  font-size: clamp(2rem, 7vw, 3.2rem);
+  font-size: clamp(1.8rem, 7vw, 3.2rem);
   line-height: 1;
 }
 
@@ -137,8 +140,8 @@ input {
 }
 
 .icon-button {
-  width: 46px;
-  height: 46px;
+  width: clamp(40px, 10vw, 46px);
+  height: clamp(40px, 10vw, 46px);
   border: none;
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.06);
@@ -152,7 +155,7 @@ input {
 .icon-button span {
   display: block;
   width: 6px;
-  height: 22px;
+  height: clamp(18px, 5vw, 22px);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.78);
 }
@@ -187,6 +190,8 @@ input {
   position: relative;
   display: flex;
   flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
 
 .primary-button,
@@ -234,7 +239,7 @@ input {
 }
 
 canvas {
-  width: 100%;
+  width: min(100%, 100vw);
   height: auto;
   aspect-ratio: 3 / 4;
   display: block;
@@ -244,11 +249,11 @@ canvas {
 }
 
 .status-text {
-  margin: 10px 4px 0;
+  margin: 8px 4px 0;
   min-height: 1.35em;
   text-align: center;
   color: rgba(255, 255, 255, 0.74);
-  font-size: 0.94rem;
+  font-size: clamp(0.82rem, 2.8vw, 0.94rem);
 }
 
 .overlay {
@@ -294,6 +299,27 @@ canvas {
   padding: 12px 0;
 }
 
+@media (max-height: 740px) {
+  .game-screen {
+    gap: 10px;
+    padding-bottom: calc(10px + var(--safe-bottom));
+  }
+
+  .hud-label {
+    font-size: 0.7rem;
+  }
+
+  .score-block strong,
+  .hud-center strong {
+    font-size: clamp(1.5rem, 6vw, 2.4rem);
+  }
+
+  .status-text {
+    margin-top: 6px;
+    min-height: 1.2em;
+  }
+}
+
 @media (min-width: 431px) {
   body {
     background:
@@ -302,6 +328,7 @@ canvas {
   }
 
   .app-shell {
+    max-width: 540px;
     box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 40px 90px rgba(0, 0, 0, 0.45);
   }
 }

@@ -29,18 +29,13 @@ function mixChannel(start, end, progress) {
   return Math.round(start + (end - start) * progress);
 }
 
-export function createRenderer(canvas, config = GAME_CONFIG) {
+export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
   const context = canvas.getContext("2d");
+  const autoResize = options.autoResize !== false;
+  const pixelRatio = options.pixelRatio || globalThis.devicePixelRatio || 1;
+  const showRoundBanner = options.showRoundBanner !== false;
 
-  function resize() {
-    const ratio = globalThis.devicePixelRatio || 1;
-    canvas.width = config.width * ratio;
-    canvas.height = config.height * ratio;
-    context.setTransform(ratio, 0, 0, ratio, 0, 0);
-  }
-
-  function render(state, resolveEntityPosition) {
-    context.clearRect(0, 0, config.width, config.height);
+  function drawScene(state, resolveEntityPosition) {
     drawBackground();
     drawGrid(state);
     drawFailLine(state);
@@ -50,8 +45,38 @@ export function createRenderer(canvas, config = GAME_CONFIG) {
     drawBalls(state);
     drawParticles(state);
     drawLauncher(state);
-    drawBanner(state);
+    if (showRoundBanner) {
+      drawBanner(state);
+    }
     drawGameOverMessage(state);
+  }
+
+  function resize() {
+    if (!autoResize) {
+      return;
+    }
+
+    canvas.width = config.width * pixelRatio;
+    canvas.height = config.height * pixelRatio;
+    context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  }
+
+  function render(state, resolveEntityPosition, overlayRenderer = null, viewport = null) {
+    if (viewport) {
+      context.clearRect(0, 0, viewport.screenWidth, viewport.screenHeight);
+      context.save();
+      context.translate(viewport.x, viewport.y);
+      context.scale(viewport.width / config.width, viewport.height / config.height);
+      drawScene(state, resolveEntityPosition);
+      context.restore();
+    } else {
+      context.clearRect(0, 0, config.width, config.height);
+      drawScene(state, resolveEntityPosition);
+    }
+
+    if (overlayRenderer) {
+      overlayRenderer(context, state, viewport);
+    }
   }
 
   function drawBackground() {
@@ -107,7 +132,7 @@ export function createRenderer(canvas, config = GAME_CONFIG) {
       context.strokeRect(visibleRect.x, visibleRect.y, visibleRect.size, visibleRect.size);
 
       context.fillStyle = "#eef8ff";
-      context.font = "700 30px 'Segoe UI'";
+      context.font = "700 36px 'Segoe UI'";
       context.textAlign = "center";
       context.textBaseline = "middle";
       context.fillText(String(block.hp), visibleRect.x + visibleRect.size / 2, visibleRect.y + visibleRect.size / 2 + 2);
@@ -158,6 +183,11 @@ export function createRenderer(canvas, config = GAME_CONFIG) {
 
   function drawBalls(state) {
     for (const ball of state.balls) {
+      // Only active balls should render in-flight; settled or queued balls are represented by the launcher.
+      if (!ball.active || ball.returned) {
+        continue;
+      }
+
       context.beginPath();
       context.arc(ball.x, ball.y, config.ballRadius, 0, Math.PI * 2);
       context.fillStyle = "#eff9ff";
@@ -181,7 +211,8 @@ export function createRenderer(canvas, config = GAME_CONFIG) {
   }
 
   function drawLauncher(state) {
-    const pulse = 0.5 + Math.sin(performance.now() * 0.005) * 0.12;
+    const timeNow = globalThis.performance?.now?.() ?? Date.now();
+    const pulse = 0.5 + Math.sin(timeNow * 0.005) * 0.12;
     context.beginPath();
     context.arc(state.launcherX, state.arena.launcherY, 13 + pulse * 2, 0, Math.PI * 2);
     context.fillStyle = "rgba(255, 179, 71, 0.18)";
@@ -193,10 +224,10 @@ export function createRenderer(canvas, config = GAME_CONFIG) {
 
     // Keep the ball count anchored to the launcher so the player can read volley size at a glance.
     context.fillStyle = "#d8f1ff";
-    context.font = "700 20px 'Segoe UI'";
+    context.font = "700 28px 'Segoe UI'";
     context.textAlign = "left";
     context.textBaseline = "middle";
-    context.fillText(`x${state.ballsOwned}`, state.launcherX + 22, state.arena.launcherY);
+    context.fillText(`x${state.ballsOwned}`, state.launcherX + 28, state.arena.launcherY + 1);
   }
 
   function drawBanner(state) {
@@ -247,9 +278,12 @@ export function createRenderer(canvas, config = GAME_CONFIG) {
     context.restore();
   }
 
-  resize();
+  if (autoResize) {
+    resize();
+  }
 
   return {
+    context,
     resize,
     render
   };

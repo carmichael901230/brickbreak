@@ -1,7 +1,8 @@
 import { STORAGE_KEYS } from "./config.js";
 
 const defaultSettings = {
-  soundEnabled: false
+  soundEnabled: false,
+  language: "zh-CN"
 };
 
 function safeParse(rawValue, fallback) {
@@ -51,3 +52,28 @@ export function createStorageAdapter(storage = globalThis.localStorage) {
 }
 
 export { defaultSettings };
+
+export function createWeChatStorageAdapter(wxApi) {
+  if (!wxApi) {
+    return createStorageAdapter(null);
+  }
+
+  return createStorageAdapter({
+    getItem(key) {
+      try {
+        const value = wxApi.getStorageSync(key);
+        return value === "" || value === undefined ? null : String(value);
+      } catch {
+        return null;
+      }
+    },
+
+    setItem(key, value) {
+      try {
+        wxApi.setStorageSync(key, value);
+      } catch {
+        // Ignore storage write failures so gameplay can continue.
+      }
+    }
+  });
+}

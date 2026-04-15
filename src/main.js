@@ -8,6 +8,8 @@ import { createStorageAdapter } from "./storage.js";
 
 const mainMenu = document.querySelector("#mainMenu");
 const gameScreen = document.querySelector("#gameScreen");
+const topHud = document.querySelector("#topHud");
+const boardShell = document.querySelector("#boardShell");
 const canvas = document.querySelector("#gameCanvas");
 const playButton = document.querySelector("#playButton");
 const pauseButton = document.querySelector("#pauseButton");
@@ -51,6 +53,31 @@ function setStatus(message) {
   statusText.textContent = message;
 }
 
+function syncResponsiveLayout() {
+  const viewportHeight = globalThis.innerHeight || document.documentElement.clientHeight;
+  document.documentElement.style.setProperty("--viewport-height", `${viewportHeight}px`);
+
+  const shellWidth = Math.min(globalThis.innerWidth || document.documentElement.clientWidth, 540);
+  document.documentElement.style.setProperty("--phone-shell-width", `${shellWidth}px`);
+
+  if (appScreen !== "game") {
+    canvas.style.width = "";
+    canvas.style.height = "";
+    return;
+  }
+
+  const availableWidth = boardShell.clientWidth;
+  const availableHeight = Math.max(
+    120,
+    gameScreen.clientHeight - topHud.offsetHeight - statusText.offsetHeight - 8
+  );
+  const boardWidth = Math.min(availableWidth, availableHeight * (GAME_CONFIG.width / GAME_CONFIG.height));
+  const boardHeight = boardWidth * (GAME_CONFIG.height / GAME_CONFIG.width);
+
+  canvas.style.width = `${boardWidth}px`;
+  canvas.style.height = `${boardHeight}px`;
+}
+
 function toggleElement(element, shouldShow) {
   element.classList.toggle("is-hidden", !shouldShow);
   element.setAttribute("aria-hidden", String(!shouldShow));
@@ -62,6 +89,7 @@ function syncScreenState() {
   toggleElement(pauseOverlay, overlayScreen === "pause");
   toggleElement(settingsOverlay, overlayScreen === "settings");
   toggleElement(gameOverOverlay, overlayScreen === "gameover");
+  syncResponsiveLayout();
 }
 
 function isSimulationPaused() {
@@ -171,7 +199,10 @@ gameOverMenuButton.addEventListener("click", () => {
   syncHud();
 });
 
-globalThis.addEventListener("resize", () => renderer.resize());
+globalThis.addEventListener("resize", () => {
+  renderer.resize();
+  syncResponsiveLayout();
+});
 
 let lastTime = performance.now();
 function frame(now) {
@@ -196,4 +227,5 @@ function frame(now) {
 
 syncScreenState();
 syncHud();
+syncResponsiveLayout();
 requestAnimationFrame(frame);

@@ -11,7 +11,7 @@ export const GAME_CONFIG = {
   collisionPadding: 5,
   ballRadius: 8,
   ballSpeed: 860,
-  aimSensitivity: 1.75,
+  aimSensitivity: 2.35,
   speedUpMultiplier: 2,
   speedUpDelay: 5,
   launchInterval: 0.06,
