@@ -1,7 +1,7 @@
 import { STORAGE_KEYS } from "./config.js";
 
 const defaultSettings = {
-  soundEnabled: false,
+  soundEnabled: true,
   language: "zh-CN"
 };
 

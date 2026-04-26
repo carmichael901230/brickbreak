@@ -91,7 +91,7 @@ test("storage adapter falls back safely on corrupt settings", () => {
     "arc-cascade-settings": "{bad"
   });
   const adapter = createStorageAdapter(storage);
-  assert.deepEqual(adapter.loadSettings(), { soundEnabled: false, language: "zh-CN" });
+  assert.deepEqual(adapter.loadSettings(), { soundEnabled: true, language: "zh-CN" });
 });
 
 test("storage adapter persists and loads best score", () => {

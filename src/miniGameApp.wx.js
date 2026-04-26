@@ -49,7 +49,7 @@ function hitTest(button, point) {
   );
 }
 
-function loadTutorialImage(wxApi, canvas) {
+function loadImageAsset(wxApi, canvas, src) {
   const image = wxApi.createImage?.() || canvas.createImage?.();
   if (!image) {
     return { image: null, loaded: false };
@@ -66,8 +66,83 @@ function loadTutorialImage(wxApi, canvas) {
   image.onerror = () => {
     asset.loaded = false;
   };
-  image.src = "src/assets/tap.png";
+  image.src = src;
   return asset;
+}
+
+function createHitSoundPlayer(wxApi, poolSize = 3) {
+  if (!wxApi.createInnerAudioContext) {
+    return {
+      destroy() {},
+      play() {}
+    };
+  }
+
+  const players = Array.from({ length: poolSize }, () => {
+    const audio = wxApi.createInnerAudioContext();
+    audio.src = "src/assets/sound/bubble_sound.m4a";
+    audio.loop = false;
+    audio.autoplay = false;
+    audio.volume = 0.4;
+    return {
+      audio,
+      busy: false
+    };
+  });
+  let nextIndex = 0;
+  let lastPlayAt = 0;
+
+  for (const player of players) {
+    const release = () => {
+      player.busy = false;
+    };
+    player.audio.onEnded?.(release);
+    player.audio.onStop?.(release);
+    player.audio.onError?.(release);
+  }
+
+  return {
+    destroy() {
+      for (const player of players) {
+        player.audio.destroy?.();
+      }
+    },
+
+    play() {
+      const now = Date.now();
+
+      // Allow overlap, but only at a controlled rate so dense collisions do not spike in loudness.
+      if (now - lastPlayAt < 45) {
+        return;
+      }
+
+      let availablePlayer = null;
+      for (let offset = 0; offset < players.length; offset += 1) {
+        const player = players[(nextIndex + offset) % players.length];
+        if (!player.busy) {
+          availablePlayer = player;
+          nextIndex = (nextIndex + offset + 1) % players.length;
+          break;
+        }
+      }
+
+      if (!availablePlayer) {
+        return;
+      }
+
+      lastPlayAt = now;
+      availablePlayer.busy = true;
+      const audio = availablePlayer.audio;
+      if ("seek" in audio && typeof audio.seek === "function") {
+        try {
+          audio.seek(0);
+        } catch {
+          // Some runtimes do not allow seek before the first play; resetting is best-effort only.
+        }
+      }
+      audio.play();
+    }
+  };
 }
 
 export function bootMiniGame(wxApi = globalThis.wx) {
@@ -93,13 +168,20 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   const settings = storage.loadSettings();
   const audioBus = createAudioBus();
   audioBus.setEnabled(settings.soundEnabled);
-  const tutorialAsset = loadTutorialImage(wxApi, canvas);
+  const tutorialAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/tap.png");
+  const settingsIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/settings.png");
+  const hitSoundPlayer = createHitSoundPlayer(wxApi);
 
   const boardGenerator = createBoardGenerator(GAME_CONFIG);
   const game = createGameController({
     config: GAME_CONFIG,
     boardGenerator,
     audioBus
+  });
+  audioBus.onEvent(({ type }) => {
+    if (type === "hit") {
+      hitSoundPlayer.play();
+    }
   });
 
   let screen = "menu";
@@ -195,7 +277,14 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     const rect = canvasRect();
 
     if (screen === "menu") {
-      return [
+      const buttons = [
+        {
+          id: "menu-settings",
+          x: rect.horizontalPadding,
+          y: rect.topInset + 10,
+          width: 60,
+          height: 60
+        },
         {
           id: "play",
           x: rect.x + 32,
@@ -204,6 +293,15 @@ export function bootMiniGame(wxApi = globalThis.wx) {
           height: 56
         }
       ];
+
+      if (overlay === "settings") {
+        buttons.push(
+          { id: "toggle-sound", x: rect.x + rect.width - 132, y: rect.y + rect.height * 0.47, width: 96, height: 46 },
+          { id: "settings-done", x: rect.x + 36, y: rect.y + rect.height * 0.68, width: rect.width - 72, height: 52 }
+        );
+      }
+
+      return buttons;
     }
 
     const buttons = [
@@ -269,6 +367,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         overlay = null;
         break;
       case "settings":
+      case "menu-settings":
         overlay = "settings";
         break;
       case "toggle-sound":
@@ -276,7 +375,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         saveSettings();
         break;
       case "settings-done":
-        overlay = "pause";
+        overlay = screen === "menu" ? null : "pause";
         break;
       case "menu":
         goToMenu();
@@ -328,6 +427,23 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     );
   }
 
+  function drawGearButton(context, button) {
+    roundedRect(context, button.x, button.y, button.width, button.height, 16);
+    context.fillStyle = "#171717";
+    context.fill();
+
+    if (settingsIconAsset.loaded && settingsIconAsset.image) {
+      const iconInset = 1;
+      context.drawImage(
+        settingsIconAsset.image,
+        button.x + iconInset,
+        button.y + iconInset,
+        button.width - iconInset * 2,
+        button.height - iconInset * 2
+      );
+    }
+  }
+
   function drawMiniOverlay(context, state) {
     const rect = canvasRect();
 
@@ -342,46 +458,53 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       context.font = "20px sans-serif";
       context.fillText(texts.menuLineOne, screenWidth / 2, rect.y + 192);
       context.fillText(texts.menuLineTwo, screenWidth / 2, rect.y + 220);
+      drawGearButton(context, currentButtons().find((button) => button.id === "menu-settings"));
       drawButton(context, currentButtons().find((button) => button.id === "play"), texts.play, true);
-      return;
+      if (!overlay) {
+        return;
+      }
     }
 
-    context.fillStyle = "rgba(255,255,255,0.72)";
-    context.font = "15px sans-serif";
-    context.textAlign = "left";
-    context.fillText(texts.best, rect.horizontalPadding + 58, rect.topInset + 16);
-    context.fillStyle = "#fbfbfb";
-    context.font = "700 42px sans-serif";
-    context.fillText(String(bestScore), rect.horizontalPadding + 58, rect.topInset + 54);
+    if (screen !== "menu") {
+      context.fillStyle = "rgba(255,255,255,0.72)";
+      context.font = "15px sans-serif";
+      context.textAlign = "left";
+      context.fillText(texts.best, rect.horizontalPadding + 58, rect.topInset + 16);
+      context.fillStyle = "#fbfbfb";
+      context.font = "700 42px sans-serif";
+      context.fillText(String(bestScore), rect.horizontalPadding + 58, rect.topInset + 54);
 
-    context.textAlign = "center";
-    context.fillStyle = "rgba(255,255,255,0.72)";
-    context.font = "15px sans-serif";
-    context.fillText(texts.round, screenWidth / 2, rect.topInset + 16);
-    context.fillStyle = "#fbfbfb";
-    context.font = "700 42px sans-serif";
-    context.fillText(String(state.round), screenWidth / 2, rect.topInset + 54);
+      context.textAlign = "center";
+      context.fillStyle = "rgba(255,255,255,0.72)";
+      context.font = "15px sans-serif";
+      context.fillText(texts.round, screenWidth / 2, rect.topInset + 16);
+      context.fillStyle = "#fbfbfb";
+      context.font = "700 42px sans-serif";
+      context.fillText(String(state.round), screenWidth / 2, rect.topInset + 54);
 
-    const pauseButton = currentButtons().find((button) => button.id === "pause");
-    if (pauseButton && state.state !== "gameover") {
-      roundedRect(context, pauseButton.x, pauseButton.y, pauseButton.width, pauseButton.height, 16);
-      context.fillStyle = "rgba(255,255,255,0.06)";
-      context.fill();
-      context.fillStyle = "rgba(255,255,255,0.78)";
-      context.fillRect(pauseButton.x + 14, pauseButton.y + 12, 6, 22);
-      context.fillRect(pauseButton.x + 26, pauseButton.y + 12, 6, 22);
-    }
+      const pauseButton = currentButtons().find((button) => button.id === "pause");
+      if (pauseButton && state.state !== "gameover") {
+        roundedRect(context, pauseButton.x, pauseButton.y, pauseButton.width, pauseButton.height, 16);
+        context.fillStyle = "rgba(255,255,255,0.06)";
+        context.fill();
+        context.fillStyle = "rgba(255,255,255,0.78)";
+        context.fillRect(pauseButton.x + 14, pauseButton.y + 12, 6, 22);
+        context.fillRect(pauseButton.x + 26, pauseButton.y + 12, 6, 22);
+      }
 
-    const speedButton = currentButtons().find((button) => button.id === "speed");
-    if (speedButton) {
-      drawButton(context, speedButton, texts.speed);
-    }
+      const speedButton = currentButtons().find((button) => button.id === "speed");
+      if (speedButton) {
+        drawButton(context, speedButton, texts.speed);
+      }
 
-    if (shouldShowTutorial(state)) {
-      drawTutorialHint(context, rect);
-    }
+      if (shouldShowTutorial(state)) {
+        drawTutorialHint(context, rect);
+      }
 
-    if (!overlay) {
+      if (!overlay) {
+        return;
+      }
+    } else if (!overlay) {
       return;
     }
 
@@ -423,7 +546,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
 
     for (const button of currentButtons()) {
-      if (["play", "pause", "speed"].includes(button.id)) {
+      if (["play", "pause", "speed", "menu-settings"].includes(button.id)) {
         continue;
       }
 
