@@ -160,6 +160,8 @@ function enableWeChatShare(wxApi) {
   wxApi.onShareTimeline?.(() => sharePayload);
 }
 
+const GAME_PROGRESS_VERSION = 1;
+
 export function bootMiniGame(wxApi = globalThis.wx) {
   const systemInfo = wxApi.getSystemInfoSync();
   enableWeChatShare(wxApi);
@@ -208,6 +210,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let lastTime = Date.now();
   let tutorialIdleTime = 0;
   let tutorialDismissed = false;
+  let lastSavedProgressJson = null;
+  let lastSavedProgressAt = 0;
 
   const scheduleFrame =
     globalThis.requestAnimationFrame?.bind(globalThis) ||
@@ -261,12 +265,74 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
   }
 
+  function buildProgressPayload() {
+    const snapshot = game.exportSnapshot();
+    if (!snapshot || screen !== "game") {
+      return null;
+    }
+
+    return {
+      version: GAME_PROGRESS_VERSION,
+      savedAt: Date.now(),
+      bestScore,
+      snapshot
+    };
+  }
+
+  function clearSavedProgress() {
+    lastSavedProgressJson = null;
+    storage.clearGameProgress();
+  }
+
+  function persistProgress(force = false) {
+    const progress = buildProgressPayload();
+    if (!progress) {
+      if (force) {
+        clearSavedProgress();
+      }
+      return;
+    }
+
+    const progressJson = JSON.stringify(progress);
+    const now = Date.now();
+    if (!force && progressJson === lastSavedProgressJson && now - lastSavedProgressAt < 1000) {
+      return;
+    }
+
+    storage.saveGameProgress(progress);
+    lastSavedProgressJson = progressJson;
+    lastSavedProgressAt = now;
+  }
+
+  function tryResumeSavedProgress() {
+    const progress = storage.loadGameProgress();
+    if (!progress || progress.version !== GAME_PROGRESS_VERSION || !progress.snapshot) {
+      return false;
+    }
+
+    const restored = game.importSnapshot(progress.snapshot);
+    if (!restored) {
+      clearSavedProgress();
+      return false;
+    }
+
+    screen = "game";
+    overlay = "pause";
+    bestScore = Math.max(bestScore, Number(progress.bestScore) || 0);
+    tutorialIdleTime = 0;
+    tutorialDismissed = true;
+    lastSavedProgressJson = JSON.stringify(progress);
+    lastSavedProgressAt = Date.now();
+    return true;
+  }
+
   function startRun() {
     game.restart();
     screen = "game";
     overlay = null;
     tutorialIdleTime = 0;
     tutorialDismissed = false;
+    persistProgress(true);
   }
 
   function goToMenu() {
@@ -274,6 +340,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     screen = "menu";
     pointerActive = false;
     tutorialIdleTime = 0;
+    clearSavedProgress();
   }
 
   function shouldShowTutorial(state) {
@@ -381,6 +448,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         break;
       case "resume":
         overlay = null;
+        persistProgress(true);
         break;
       case "settings":
       case "menu-settings":
@@ -712,6 +780,11 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     pointerActive = false;
     touchStart = null;
   });
+  wxApi.onHide?.(() => {
+    persistProgress(true);
+  });
+
+  tryResumeSavedProgress();
 
   function loop() {
     const now = Date.now();
@@ -735,10 +808,14 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       game.update(deltaTime);
       if (game.getState().state === "gameover") {
         overlay = "gameover";
+        clearSavedProgress();
       }
     }
 
     syncBestScore();
+    if (screen === "game" && overlay !== "gameover") {
+      persistProgress();
+    }
     if (screen === "game") {
       const rect = canvasRect();
       renderer.render(

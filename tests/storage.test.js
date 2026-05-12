@@ -11,6 +11,9 @@ function createMemoryStorage(seed = {}) {
     },
     setItem(key, value) {
       values.set(key, value);
+    },
+    removeItem(key) {
+      values.delete(key);
     }
   };
 }
@@ -28,4 +31,21 @@ test("storage adapter persists and loads best score", () => {
   const adapter = createStorageAdapter(storage);
   adapter.saveBestScore(12);
   assert.equal(adapter.loadBestScore(), 12);
+});
+
+test("storage adapter persists and clears saved game progress", () => {
+  const storage = createMemoryStorage();
+  const adapter = createStorageAdapter(storage);
+  const progress = {
+    version: 1,
+    snapshot: {
+      round: 4
+    }
+  };
+
+  adapter.saveGameProgress(progress);
+  assert.deepEqual(adapter.loadGameProgress(), progress);
+
+  adapter.clearGameProgress();
+  assert.equal(adapter.loadGameProgress(), null);
 });

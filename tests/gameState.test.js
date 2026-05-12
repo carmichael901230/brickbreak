@@ -40,3 +40,30 @@ test("round resolves after all balls return and applies collected pickups", () =
   assert.ok(state.ballsOwned >= 1);
   assert.equal(state.state, "aiming");
 });
+
+test("game state snapshot can be exported and restored", () => {
+  const game = createGameController({
+    boardGenerator: createBoardGenerator([
+      { blocks: [{ id: "b1", row: 0, column: 2, hp: 3, maxHp: 3 }], pickups: [] }
+    ]),
+    audioBus: createAudioBus()
+  });
+
+  game.startAim({ x: 360, y: 800 });
+  game.updateAim({ x: 500, y: 300 });
+  game.releaseAim({ x: 500, y: 300 });
+  game.update(0.016);
+
+  const snapshot = game.exportSnapshot();
+  assert.ok(snapshot);
+
+  const restored = createGameController({
+    boardGenerator: createBoardGenerator([{ blocks: [], pickups: [] }]),
+    audioBus: createAudioBus()
+  });
+
+  assert.equal(restored.importSnapshot(snapshot), true);
+  assert.deepEqual(restored.getState().blocks, game.getState().blocks);
+  assert.equal(restored.getState().state, game.getState().state);
+  assert.equal(restored.getState().round, game.getState().round);
+});

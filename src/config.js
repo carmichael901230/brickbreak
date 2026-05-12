@@ -36,5 +36,6 @@ export const GAME_CONFIG = {
 
 export const STORAGE_KEYS = {
   bestScore: "arc-cascade-best-score",
-  settings: "arc-cascade-settings"
+  settings: "arc-cascade-settings",
+  gameProgress: "arc-cascade-game-progress"
 };

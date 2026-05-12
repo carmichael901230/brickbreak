@@ -47,6 +47,35 @@ export function createStorageAdapter(storage = globalThis.localStorage) {
       }
 
       storage.setItem(STORAGE_KEYS.bestScore, String(Math.max(0, Math.floor(score))));
+    },
+
+    loadGameProgress() {
+      if (!storage) {
+        return null;
+      }
+
+      return safeParse(storage.getItem(STORAGE_KEYS.gameProgress), null);
+    },
+
+    saveGameProgress(progress) {
+      if (!storage) {
+        return;
+      }
+
+      storage.setItem(STORAGE_KEYS.gameProgress, JSON.stringify(progress));
+    },
+
+    clearGameProgress() {
+      if (!storage) {
+        return;
+      }
+
+      if (typeof storage.removeItem === "function") {
+        storage.removeItem(STORAGE_KEYS.gameProgress);
+        return;
+      }
+
+      storage.setItem(STORAGE_KEYS.gameProgress, "");
     }
   };
 }
@@ -71,6 +100,14 @@ export function createWeChatStorageAdapter(wxApi) {
     setItem(key, value) {
       try {
         wxApi.setStorageSync(key, value);
+      } catch {
+        // Ignore storage write failures so gameplay can continue.
+      }
+    },
+
+    removeItem(key) {
+      try {
+        wxApi.removeStorageSync?.(key);
       } catch {
         // Ignore storage write failures so gameplay can continue.
       }

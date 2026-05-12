@@ -48,6 +48,32 @@ function createBall(launcherX, launcherY) {
   };
 }
 
+function cloneSerializable(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function restoreNumber(value, fallback) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function restoreBoolean(value, fallback) {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function restorePoint(value, fallback = null) {
+  if (!value || typeof value !== "object") {
+    return fallback;
+  }
+
+  const x = restoreNumber(value.x, NaN);
+  const y = restoreNumber(value.y, NaN);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    return fallback;
+  }
+
+  return { x, y };
+}
+
 export function createInitialGameState(config = GAME_CONFIG) {
   const arena = buildArena(config);
 
@@ -168,6 +194,97 @@ export function createGameController({
   function restart() {
     gameState = createInitialGameState(config);
     spawnRound();
+  }
+
+  function exportSnapshot() {
+    if (gameState.state === "gameover") {
+      return null;
+    }
+
+    return cloneSerializable({
+      round: gameState.round,
+      score: gameState.score,
+      bestScore: gameState.bestScore,
+      ballsOwned: gameState.ballsOwned,
+      ballsLaunched: gameState.ballsLaunched,
+      returnedBalls: gameState.returnedBalls,
+      launcherX: gameState.launcherX,
+      launcherTargetX: gameState.launcherTargetX,
+      aiming: gameState.aiming,
+      aimDragOrigin: gameState.aimDragOrigin,
+      aimPoint: gameState.aimPoint,
+      launchDirection: gameState.launchDirection,
+      launchCooldown: gameState.launchCooldown,
+      speedMultiplier: gameState.speedMultiplier,
+      volleyElapsed: gameState.volleyElapsed,
+      speedUpAvailable: gameState.speedUpAvailable,
+      speedUpUsed: gameState.speedUpUsed,
+      state: gameState.state,
+      blocks: gameState.blocks,
+      pickups: gameState.pickups,
+      balls: gameState.balls,
+      particles: gameState.particles,
+      bannerTimer: gameState.bannerTimer,
+      firstReturnX: gameState.firstReturnX
+    });
+  }
+
+  function importSnapshot(snapshot) {
+    if (!snapshot || typeof snapshot !== "object") {
+      return false;
+    }
+
+    const nextState = createInitialGameState(config);
+    const allowedStates = new Set(["aiming", "launching", "resolving"]);
+    if (!allowedStates.has(snapshot.state)) {
+      return false;
+    }
+
+    nextState.round = Math.max(1, Math.floor(restoreNumber(snapshot.round, nextState.round)));
+    nextState.score = Math.max(0, Math.floor(restoreNumber(snapshot.score, nextState.score)));
+    nextState.bestScore = Math.max(0, Math.floor(restoreNumber(snapshot.bestScore, nextState.bestScore)));
+    nextState.ballsOwned = Math.max(1, Math.floor(restoreNumber(snapshot.ballsOwned, nextState.ballsOwned)));
+    nextState.ballsLaunched = Math.max(0, Math.floor(restoreNumber(snapshot.ballsLaunched, nextState.ballsLaunched)));
+    nextState.returnedBalls = Math.max(0, Math.floor(restoreNumber(snapshot.returnedBalls, nextState.returnedBalls)));
+    nextState.launcherX = restoreNumber(snapshot.launcherX, nextState.launcherX);
+    nextState.launcherTargetX = restoreNumber(snapshot.launcherTargetX, nextState.launcherTargetX);
+    nextState.aiming = restoreBoolean(snapshot.aiming, nextState.aiming);
+    nextState.aimDragOrigin = restorePoint(snapshot.aimDragOrigin);
+    nextState.aimPoint = restorePoint(snapshot.aimPoint);
+    nextState.launchDirection = restorePoint(snapshot.launchDirection);
+    nextState.launchCooldown = restoreNumber(snapshot.launchCooldown, nextState.launchCooldown);
+    nextState.speedMultiplier = restoreNumber(snapshot.speedMultiplier, nextState.speedMultiplier);
+    nextState.volleyElapsed = restoreNumber(snapshot.volleyElapsed, nextState.volleyElapsed);
+    nextState.speedUpAvailable = restoreBoolean(snapshot.speedUpAvailable, nextState.speedUpAvailable);
+    nextState.speedUpUsed = restoreBoolean(snapshot.speedUpUsed, nextState.speedUpUsed);
+    nextState.state = snapshot.state;
+    nextState.bannerTimer = restoreNumber(snapshot.bannerTimer, nextState.bannerTimer);
+    nextState.firstReturnX = snapshot.firstReturnX === null ? null : restoreNumber(snapshot.firstReturnX, null);
+    nextState.gameOver = false;
+
+    if (Array.isArray(snapshot.blocks)) {
+      nextState.blocks = cloneSerializable(snapshot.blocks);
+    }
+    if (Array.isArray(snapshot.pickups)) {
+      nextState.pickups = cloneSerializable(snapshot.pickups);
+    }
+    if (Array.isArray(snapshot.balls) && snapshot.balls.length > 0) {
+      nextState.balls = cloneSerializable(snapshot.balls);
+    }
+    if (Array.isArray(snapshot.particles)) {
+      nextState.particles = cloneSerializable(snapshot.particles);
+    }
+
+    nextState.ballsOwned = Math.max(nextState.ballsOwned, nextState.balls.length);
+    nextState.ballsLaunched = Math.min(nextState.ballsLaunched, nextState.balls.length);
+    nextState.returnedBalls = Math.min(nextState.returnedBalls, nextState.balls.length);
+    if (nextState.state === "aiming") {
+      nextState.aiming = false;
+      nextState.aimDragOrigin = null;
+    }
+
+    gameState = nextState;
+    return true;
   }
 
   function startAim(point) {
@@ -449,6 +566,8 @@ export function createGameController({
 
   return {
     activateSpeedUp,
+    exportSnapshot,
+    importSnapshot,
     restart,
     startAim,
     updateAim,
