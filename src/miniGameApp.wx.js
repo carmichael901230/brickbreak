@@ -145,8 +145,24 @@ function createHitSoundPlayer(wxApi, poolSize = 3) {
   };
 }
 
+function enableWeChatShare(wxApi) {
+  const sharePayload = {
+    title: "弹球突围 - 一起来挑战更高回合",
+    imageUrl: "src/assets/pic/icon.png",
+    query: "from=menu-share"
+  };
+
+  wxApi.showShareMenu?.({
+    menus: ["shareAppMessage", "shareTimeline"]
+  });
+
+  wxApi.onShareAppMessage?.(() => sharePayload);
+  wxApi.onShareTimeline?.(() => sharePayload);
+}
+
 export function bootMiniGame(wxApi = globalThis.wx) {
   const systemInfo = wxApi.getSystemInfoSync();
+  enableWeChatShare(wxApi);
   const canvas = wxApi.createCanvas();
   const pixelRatio = systemInfo.pixelRatio || 1;
   // WeChat real devices report a visible window area that can differ from the physical screen size.
