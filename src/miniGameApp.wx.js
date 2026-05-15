@@ -10,6 +10,13 @@ const texts = {
   menuLineOne: "调整角度，击碎砖块。",
   menuLineTwo: "再坚持一回合。",
   play: "开始游戏",
+  shop: "商店",
+  brickSkins: "砖块",
+  ballSkins: "小球",
+  buy: "购买",
+  selected: "已选择",
+  use: "使用",
+  coinsShort: "金币不足",
   best: "最高分",
   round: "回合",
   paused: "已暂停",
@@ -49,6 +56,10 @@ function hitTest(button, point) {
   );
 }
 
+function cloneSerializable(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
 function loadImageAsset(wxApi, canvas, src) {
   const image = wxApi.createImage?.() || canvas.createImage?.();
   if (!image) {
@@ -70,7 +81,7 @@ function loadImageAsset(wxApi, canvas, src) {
   return asset;
 }
 
-function createHitSoundPlayer(wxApi, poolSize = 3) {
+function createSoundPlayer(wxApi, src, { poolSize = 1, volume = 0.4, cooldownMs = 0 } = {}) {
   if (!wxApi.createInnerAudioContext) {
     return {
       destroy() {},
@@ -80,10 +91,10 @@ function createHitSoundPlayer(wxApi, poolSize = 3) {
 
   const players = Array.from({ length: poolSize }, () => {
     const audio = wxApi.createInnerAudioContext();
-    audio.src = "src/assets/sound/bubble_sound.m4a";
+    audio.src = src;
     audio.loop = false;
     audio.autoplay = false;
-    audio.volume = 0.4;
+    audio.volume = volume;
     return {
       audio,
       busy: false
@@ -111,8 +122,7 @@ function createHitSoundPlayer(wxApi, poolSize = 3) {
     play() {
       const now = Date.now();
 
-      // Allow overlap, but only at a controlled rate so dense collisions do not spike in loudness.
-      if (now - lastPlayAt < 45) {
+      if (now - lastPlayAt < cooldownMs) {
         return;
       }
 
@@ -175,30 +185,44 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   canvas.width = screenWidth * pixelRatio;
   canvas.height = screenHeight * pixelRatio;
 
-  const renderer = createRenderer(canvas, GAME_CONFIG, {
-    autoResize: false,
-    pixelRatio,
-    showRoundBanner: false
-  });
-  renderer.context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-
   const storage = createWeChatStorageAdapter(wxApi);
   const settings = storage.loadSettings();
   const audioBus = createAudioBus();
   audioBus.setEnabled(settings.soundEnabled);
   const tutorialAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/tap.png");
   const settingsIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/settings.png");
-  const hitSoundPlayer = createHitSoundPlayer(wxApi);
+  const coinIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/dollar.png");
+  const renderer = createRenderer(canvas, GAME_CONFIG, {
+    autoResize: false,
+    pixelRatio,
+    showRoundBanner: false,
+    coinAsset: coinIconAsset
+  });
+  renderer.context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  const hitSoundPlayer = createSoundPlayer(wxApi, "src/assets/sound/bubble_sound.m4a", {
+    poolSize: 3,
+    volume: 0.4,
+    cooldownMs: 45
+  });
+  const coinSoundPlayer = createSoundPlayer(wxApi, "src/assets/sound/coin.mp3", {
+    poolSize: 2,
+    volume: 0.72
+  });
 
   const boardGenerator = createBoardGenerator(GAME_CONFIG);
   const game = createGameController({
     config: GAME_CONFIG,
+    initialCoins: storage.loadCoins(),
+    initialSkins: storage.loadSkins(),
     boardGenerator,
     audioBus
   });
   audioBus.onEvent(({ type }) => {
     if (type === "hit") {
       hitSoundPlayer.play();
+    }
+    if (type === "coin") {
+      coinSoundPlayer.play();
     }
   });
 
@@ -213,6 +237,16 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let lastSavedProgressJson = null;
   let lastSavedProgressAt = 0;
   let hasStartedRun = false;
+  let lastSavedCoins = storage.loadCoins();
+  let lastSavedSkinsJson = JSON.stringify(storage.loadSkins());
+  let shopCategory = "brick";
+  let pendingPurchase = null;
+  let shopMessage = "";
+  let shopBannerUntil = 0;
+  let shopScrollY = 0;
+  let shopDragStartY = 0;
+  let shopDragStartScrollY = 0;
+  let shopDragging = false;
 
   const scheduleFrame =
     globalThis.requestAnimationFrame?.bind(globalThis) ||
@@ -263,6 +297,22 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     if (state.bestScore > bestScore) {
       bestScore = state.bestScore;
       storage.saveBestScore(bestScore);
+    }
+  }
+
+  function syncCoins() {
+    const coins = game.getState().coins;
+    if (coins !== lastSavedCoins) {
+      storage.saveCoins(coins);
+      lastSavedCoins = coins;
+    }
+  }
+
+  function syncSkins() {
+    const skinsJson = JSON.stringify(game.getState().skins);
+    if (skinsJson !== lastSavedSkinsJson) {
+      storage.saveSkins(game.getState().skins);
+      lastSavedSkinsJson = skinsJson;
     }
   }
 
@@ -367,6 +417,92 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     tutorialIdleTime = 0;
   }
 
+  function openShop() {
+    overlay = "shop";
+    shopCategory = "brick";
+    pendingPurchase = null;
+    shopMessage = "";
+    shopScrollY = 0;
+  }
+
+  function shopLayout() {
+    const rect = canvasRect();
+    const panel = {
+      x: rect.x,
+      y: rect.topInset,
+      width: rect.width,
+      height: screenHeight - rect.topInset - 12
+    };
+    const columns = 3;
+    const gap = 10;
+    const itemWidth = (panel.width - 32 - gap * (columns - 1)) / columns;
+    const itemHeight = clamp(itemWidth * 1.34, 116, 146);
+    const gridTop = panel.y + 166;
+    const gridBottom = panel.y + panel.height - 24;
+    const rowCount = Math.ceil(GAME_CONFIG.skins[shopCategory].length / columns);
+    const contentHeight = rowCount * itemHeight + Math.max(0, rowCount - 1) * gap;
+    const viewportHeight = gridBottom - gridTop;
+
+    return {
+      panel,
+      columns,
+      gap,
+      itemWidth,
+      itemHeight,
+      gridTop,
+      gridBottom,
+      viewportHeight,
+      maxScrollY: Math.max(0, contentHeight - viewportHeight)
+    };
+  }
+
+  function clampShopScroll(value) {
+    return clamp(value, 0, shopLayout().maxScrollY);
+  }
+
+  function isSkinOwned(category, skinId) {
+    const skin = GAME_CONFIG.skins[category].find((candidate) => candidate.id === skinId);
+    return Boolean(skin?.default) || game.getState().skins.owned[category].includes(skinId);
+  }
+
+  function handleSkinTap(category, skinId) {
+    const skin = GAME_CONFIG.skins[category].find((candidate) => candidate.id === skinId);
+    if (!skin) {
+      return;
+    }
+
+    const skins = cloneSerializable(game.getState().skins);
+    if (skin.default || skins.owned[category].includes(skin.id)) {
+      skins.selected[category] = skin.default ? null : skin.id;
+      game.setSkins(skins);
+      syncSkins();
+      pendingPurchase = null;
+      shopMessage = texts.selected;
+      return;
+    }
+
+    if (pendingPurchase?.category !== category || pendingPurchase.skinId !== skin.id) {
+      pendingPurchase = { category, skinId: skin.id };
+      shopMessage = "";
+      return;
+    }
+
+    if (!game.spendCoins(skin.price)) {
+      pendingPurchase = null;
+      shopMessage = "";
+      shopBannerUntil = Date.now() + 2000;
+      return;
+    }
+
+    skins.owned[category].push(skin.id);
+    skins.selected[category] = skin.id;
+    game.setSkins(skins);
+    syncCoins();
+    syncSkins();
+    pendingPurchase = null;
+    shopMessage = texts.selected;
+  }
+
   function shouldShowTutorial(state) {
     return (
       screen === "game" &&
@@ -382,30 +518,66 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
   function currentButtons() {
     const rect = canvasRect();
+    const layout = shopLayout();
 
     if (screen === "menu") {
-      const buttons = [
-        {
-          id: "menu-settings",
-          x: rect.horizontalPadding,
-          y: rect.topInset + 10,
-          width: 60,
-          height: 60
-        },
-        {
-          id: "play",
-          x: rect.x + 32,
-          y: rect.y + rect.height * 0.58,
-          width: rect.width - 64,
-          height: 56
-        }
-      ];
+      const buttons = overlay === "shop" || overlay === "settings"
+        ? []
+        : [
+            {
+              id: "menu-settings",
+              x: rect.horizontalPadding,
+              y: rect.topInset + 10,
+              width: 60,
+              height: 60
+            },
+            {
+              id: "play",
+              x: rect.x + 32,
+              y: rect.y + rect.height * 0.58,
+              width: rect.width - 64,
+              height: 56
+            },
+            {
+              id: "shop",
+              x: rect.x + 32,
+              y: rect.y + rect.height * 0.72,
+              width: rect.width - 64,
+              height: 56
+            }
+          ];
 
       if (overlay === "settings") {
         buttons.push(
-          { id: "toggle-sound", x: rect.x + rect.width - 132, y: rect.y + rect.height * 0.47, width: 96, height: 46 },
+          { id: "toggle-sound", x: rect.x + rect.width - 142, y: rect.y + rect.height * 0.47, width: 106, height: 48 },
           { id: "settings-done", x: rect.x + 36, y: rect.y + rect.height * 0.68, width: rect.width - 72, height: 52 }
         );
+      }
+
+      if (overlay === "shop") {
+        const tabWidth = (layout.panel.width - 44) / 2;
+        buttons.push(
+          { id: "shop-done", x: layout.panel.x + 4, y: layout.panel.y + 8, width: 58, height: 58 },
+          { id: "shop-tab-brick", x: layout.panel.x + 12, y: layout.panel.y + 104, width: tabWidth, height: 44 },
+          { id: "shop-tab-ball", x: layout.panel.x + 32 + tabWidth, y: layout.panel.y + 104, width: tabWidth, height: 44 }
+        );
+
+        for (let index = 0; index < GAME_CONFIG.skins[shopCategory].length; index += 1) {
+          const col = index % layout.columns;
+          const row = Math.floor(index / layout.columns);
+          const y = layout.gridTop + row * (layout.itemHeight + layout.gap) - shopScrollY;
+          if (y + layout.itemHeight < layout.gridTop || y > layout.gridBottom) {
+            continue;
+          }
+
+          buttons.push({
+            id: `skin-${shopCategory}-${index}`,
+            x: layout.panel.x + 16 + col * (layout.itemWidth + layout.gap),
+            y,
+            width: layout.itemWidth,
+            height: layout.itemHeight
+          });
+        }
       }
 
       return buttons;
@@ -441,8 +613,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     if (overlay === "settings") {
       buttons.push(
-        { id: "toggle-sound", x: rect.x + rect.width - 132, y: rect.y + rect.height * 0.47, width: 96, height: 46 },
-        { id: "settings-done", x: rect.x + 36, y: rect.y + rect.height * 0.68, width: rect.width - 72, height: 52 }
+        { id: "toggle-sound", x: rect.x + rect.width - 142, y: rect.y + rect.height * 0.46, width: 106, height: 48 },
+        { id: "settings-done", x: rect.x + 36, y: rect.y + rect.height * 0.62, width: rect.width - 72, height: 52 }
       );
     }
 
@@ -460,6 +632,26 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     switch (id) {
       case "play":
         playFromMenu();
+        break;
+      case "shop":
+        openShop();
+        break;
+      case "shop-tab-brick":
+        shopCategory = "brick";
+        pendingPurchase = null;
+        shopMessage = "";
+        shopScrollY = 0;
+        break;
+      case "shop-tab-ball":
+        shopCategory = "ball";
+        pendingPurchase = null;
+        shopMessage = "";
+        shopScrollY = 0;
+        break;
+      case "shop-done":
+        overlay = null;
+        pendingPurchase = null;
+        shopMessage = "";
         break;
       case "restart":
         startRun();
@@ -491,13 +683,24 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         goToMenu();
         break;
       default:
+        if (id.startsWith("skin-")) {
+          const index = Number(id.split("-").pop());
+          const skin = GAME_CONFIG.skins[shopCategory][index];
+          if (skin) {
+            handleSkinTap(shopCategory, skin.id);
+          }
+        }
         break;
     }
   }
 
   function drawButton(context, button, label, primary = false) {
+    if (!button) {
+      return;
+    }
+
     roundedRect(context, button.x, button.y, button.width, button.height, 24);
-    context.fillStyle = primary ? "#f2b400" : "rgba(255,255,255,0.08)";
+    context.fillStyle = primary ? "#f2b400" : button.id === "shop" ? "#2f80ed" : "rgba(255,255,255,0.08)";
     context.fill();
     context.strokeStyle = primary ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.12)";
     context.lineWidth = 1;
@@ -507,6 +710,113 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     context.textAlign = "center";
     context.textBaseline = "middle";
     context.fillText(label, button.x + button.width / 2, button.y + button.height / 2 + 1);
+  }
+
+  function drawShopItem(context, button, skin, category) {
+    const state = game.getState();
+    const owned = isSkinOwned(category, skin.id);
+    const selected = skin.default
+      ? state.skins.selected[category] === null
+      : state.skins.selected[category] === skin.id;
+    const pending = pendingPurchase?.category === category && pendingPurchase.skinId === skin.id;
+    const sampleSize = Math.min(button.width * 0.64, button.height * 0.54);
+    const sampleX = button.x + button.width / 2;
+    const sampleY = button.y + 18 + sampleSize / 2;
+    const priceY = button.y + button.height - 28;
+
+    roundedRect(context, button.x, button.y, button.width, button.height, 8);
+    context.fillStyle = selected ? "rgba(134,239,172,0.18)" : "rgba(255,255,255,0.08)";
+    context.fill();
+    context.strokeStyle = selected ? "rgba(134,239,172,0.78)" : "rgba(255,255,255,0.12)";
+    context.lineWidth = 1;
+    context.stroke();
+
+    context.fillStyle = skin.color;
+    if (category === "ball") {
+      context.beginPath();
+      context.arc(sampleX, sampleY, sampleSize / 2, 0, Math.PI * 2);
+      context.fill();
+    } else {
+      context.fillRect(sampleX - sampleSize / 2, sampleY - sampleSize / 2, sampleSize, sampleSize);
+    }
+
+    const label = selected ? texts.selected : owned ? texts.use : pending ? texts.buy : String(skin.price);
+    const tagWidth = Math.min(button.width - 18, 76);
+    const tagHeight = 26;
+    roundedRect(context, sampleX - tagWidth / 2, priceY - tagHeight / 2, tagWidth, tagHeight, tagHeight / 2);
+    context.fillStyle = selected
+      ? "#86efac"
+      : owned
+        ? "rgba(255,255,255,0.18)"
+        : pending
+          ? "#f2b400"
+          : "#0ea5a6";
+    context.fill();
+
+    context.fillStyle = selected || pending ? "#1d1d1d" : "#fbfbfb";
+    context.font = "800 15px sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(label, sampleX - (!owned && !pending && coinIconAsset.loaded ? 7 : 0), priceY + 1);
+    if (!owned && !pending && coinIconAsset.loaded && coinIconAsset.image) {
+      context.drawImage(coinIconAsset.image, sampleX + 14, priceY - 9, 18, 18);
+    }
+  }
+
+  function drawShopOverlay(context, rect) {
+    const layout = shopLayout();
+    const panel = layout.panel;
+
+    context.fillStyle = "rgba(0,0,0,0.62)";
+    context.fillRect(0, 0, screenWidth, screenHeight);
+
+    context.fillStyle = "#fbfbfb";
+    context.font = "800 36px sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(texts.shop, screenWidth / 2, panel.y + 48);
+
+    context.save();
+    context.strokeStyle = "#fbfbfb";
+    context.lineWidth = 8;
+    context.lineCap = "square";
+    context.beginPath();
+    context.moveTo(panel.x + 38, panel.y + 24);
+    context.lineTo(panel.x + 18, panel.y + 48);
+    context.lineTo(panel.x + 38, panel.y + 72);
+    context.stroke();
+    context.restore();
+
+    drawButton(context, currentButtons().find((button) => button.id === "shop-tab-brick"), texts.brickSkins, shopCategory === "brick");
+    drawButton(context, currentButtons().find((button) => button.id === "shop-tab-ball"), texts.ballSkins, shopCategory === "ball");
+
+    if (Date.now() < shopBannerUntil) {
+      const bannerWidth = 142;
+      const bannerHeight = 38;
+      roundedRect(context, screenWidth / 2 - bannerWidth / 2, panel.y + 70, bannerWidth, bannerHeight, bannerHeight / 2);
+      context.fillStyle = "#f2b400";
+      context.fill();
+      context.fillStyle = "#1d1d1d";
+      context.font = "800 18px sans-serif";
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText(texts.coinsShort, screenWidth / 2, panel.y + 89);
+    }
+
+    context.save();
+    context.beginPath();
+    context.rect(panel.x, layout.gridTop, panel.width, layout.viewportHeight);
+    context.clip();
+    for (const button of currentButtons().filter((candidate) => candidate.id.startsWith("skin-"))) {
+      const index = Number(button.id.split("-").pop());
+      drawShopItem(context, button, GAME_CONFIG.skins[shopCategory][index], shopCategory);
+    }
+    context.restore();
+
+    context.fillStyle = "rgba(255,255,255,0.72)";
+    context.font = "16px sans-serif";
+    context.textAlign = "center";
+    context.fillText(shopMessage, screenWidth / 2, panel.y + panel.height - 8);
   }
 
   function drawToggle(context, button, enabled) {
@@ -538,6 +848,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   function drawGearButton(context, button) {
+    if (!button) {
+      return;
+    }
+
     roundedRect(context, button.x, button.y, button.width, button.height, 16);
     context.fillStyle = "#171717";
     context.fill();
@@ -552,6 +866,37 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         button.height - iconInset * 2
       );
     }
+  }
+
+  function drawCoinCounter(context, x, y, coins, align = "right") {
+    const iconSize = 32;
+    const text = String(coins);
+    context.save();
+    context.font = "800 26px sans-serif";
+    const textWidth = context.measureText(text).width;
+    const totalWidth = iconSize + 6 + textWidth;
+    const startX = align === "right" ? x - totalWidth : x;
+
+    if (coinIconAsset.loaded && coinIconAsset.image) {
+      context.drawImage(coinIconAsset.image, startX, y - iconSize / 2, iconSize, iconSize);
+    } else {
+      context.beginPath();
+      context.arc(startX + iconSize / 2, y, iconSize / 2, 0, Math.PI * 2);
+      context.fillStyle = "#f2b400";
+      context.fill();
+      context.fillStyle = "#1d1d1d";
+      context.font = "800 18px sans-serif";
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText("$", startX + iconSize / 2, y + 1);
+      context.font = "800 26px sans-serif";
+    }
+
+    context.fillStyle = "#fbfbfb";
+    context.textAlign = "left";
+    context.textBaseline = "middle";
+    context.fillText(text, startX + iconSize + 6, y + 1);
+    context.restore();
   }
 
   function drawMiniOverlay(context, state) {
@@ -569,7 +914,15 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       context.fillText(texts.menuLineOne, screenWidth / 2, rect.y + 192);
       context.fillText(texts.menuLineTwo, screenWidth / 2, rect.y + 220);
       drawGearButton(context, currentButtons().find((button) => button.id === "menu-settings"));
-      drawButton(context, currentButtons().find((button) => button.id === "play"), texts.play, true);
+      drawCoinCounter(context, screenWidth - rect.horizontalPadding, rect.topInset + 40, state.coins);
+      if (!overlay) {
+        drawButton(context, currentButtons().find((button) => button.id === "play"), texts.play, true);
+        drawButton(context, currentButtons().find((button) => button.id === "shop"), texts.shop, false);
+      }
+      if (overlay === "shop") {
+        drawShopOverlay(context, rect);
+        return;
+      }
       if (!overlay) {
         return;
       }
@@ -591,6 +944,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       context.fillStyle = "#fbfbfb";
       context.font = "700 42px sans-serif";
       context.fillText(String(state.round), screenWidth / 2, rect.topInset + 54);
+      drawCoinCounter(context, screenWidth - rect.horizontalPadding, rect.topInset + 40, state.coins);
 
       const pauseButton = currentButtons().find((button) => button.id === "pause");
       if (pauseButton && state.state !== "gameover") {
@@ -643,10 +997,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     );
 
     if (overlay === "settings") {
+      const toggleButton = currentButtons().find((button) => button.id === "toggle-sound");
       context.fillStyle = "rgba(255,255,255,0.72)";
       context.font = "22px sans-serif";
       context.textAlign = "left";
-      context.fillText(texts.soundLabel, panel.x + 36, panel.y + 120);
+      context.textBaseline = "middle";
+      context.fillText(texts.soundLabel, panel.x + 36, toggleButton.y + toggleButton.height / 2);
     }
 
     if (overlay === "gameover") {
@@ -742,6 +1098,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       return;
     }
 
+    if (screen === "menu" && overlay === "shop") {
+      shopDragStartY = point.y;
+      shopDragStartScrollY = shopScrollY;
+      shopDragging = false;
+    }
+
     const button = currentButtons().find((candidate) => hitTest(candidate, point));
     if (button) {
       touchStart = { point, buttonId: button.id };
@@ -759,6 +1121,20 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   function onTouchMove(event) {
+    if (screen === "menu" && overlay === "shop" && touchStart) {
+      const point = getTouchPoint(event);
+      if (!point) {
+        return;
+      }
+
+      const deltaY = point.y - shopDragStartY;
+      if (Math.abs(deltaY) > 6) {
+        shopDragging = true;
+      }
+      shopScrollY = clampShopScroll(shopDragStartScrollY - deltaY);
+      return;
+    }
+
     if (!pointerActive) {
       return;
     }
@@ -779,10 +1155,11 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     if (touchStart?.buttonId) {
       const button = currentButtons().find((candidate) => candidate.id === touchStart.buttonId);
-      if (button && hitTest(button, point)) {
+      if (button && hitTest(button, point) && !(screen === "menu" && overlay === "shop" && shopDragging)) {
         handleButton(button.id);
       }
       touchStart = null;
+      shopDragging = false;
       return;
     }
 
@@ -840,6 +1217,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
 
     syncBestScore();
+    syncCoins();
     if (screen === "game" && overlay !== "gameover") {
       persistProgress();
     }

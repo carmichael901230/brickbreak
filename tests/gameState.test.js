@@ -27,9 +27,9 @@ test("round resolves after all balls return and applies collected pickups", () =
     audioBus: createAudioBus()
   });
 
-  game.startAim({ x: 360, y: 800 });
-  game.updateAim({ x: 500, y: 300 });
-  game.releaseAim({ x: 500, y: 300 });
+  game.startAim({ x: 360, y: 400 });
+  game.updateAim({ x: 220, y: 920 });
+  game.releaseAim({ x: 220, y: 920 });
 
   for (let index = 0; index < 500; index += 1) {
     game.update(0.016);

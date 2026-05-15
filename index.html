@@ -9,11 +9,16 @@
   <body>
     <main class="app-shell">
       <section id="mainMenu" class="menu-screen">
+        <div class="coin-counter menu-coins" aria-label="Coins">
+          <img src="./src/assets/pic/dollar.png" alt="" />
+          <strong id="menuCoinValue">0</strong>
+        </div>
         <div class="menu-card">
           <p class="menu-kicker">Vertical Arcade</p>
           <h1 class="menu-title">Arc Cascade</h1>
           <p class="menu-copy">Stack the angles, break the wall, survive one more round.</p>
-          <button id="playButton" class="primary-button menu-play" type="button">Play</button>
+          <button id="playButton" class="primary-button menu-play" type="button">开始游戏</button>
+          <button id="shopButton" class="shop-button menu-play" type="button">商店</button>
         </div>
       </section>
 
@@ -34,7 +39,12 @@
             <span class="hud-label">Round</span>
             <strong id="roundValue">1</strong>
           </div>
-          <div class="hud-right"></div>
+          <div class="hud-right">
+            <div class="coin-counter" aria-label="Coins">
+              <img src="./src/assets/pic/dollar.png" alt="" />
+              <strong id="coinValue">0</strong>
+            </div>
+          </div>
         </header>
 
         <section class="board-shell" id="boardShell">
@@ -73,6 +83,22 @@
           Sound Hooks
         </label>
         <button id="closeSettingsButton" class="primary-button" type="button">Done</button>
+      </div>
+    </div>
+
+    <div id="shopOverlay" class="overlay is-hidden" aria-hidden="true">
+      <div class="overlay-card shop-card">
+        <div class="shop-header">
+          <h2>Skin Shop</h2>
+        </div>
+        <div id="shopBanner" class="shop-banner is-hidden">金币不足</div>
+        <div class="shop-tabs" role="tablist" aria-label="Skin category">
+          <button id="brickShopTab" class="shop-tab is-active" type="button">Bricks</button>
+          <button id="ballShopTab" class="shop-tab" type="button">Balls</button>
+        </div>
+        <div id="shopGrid" class="shop-grid"></div>
+        <p id="shopMessage" class="shop-message" aria-live="polite"></p>
+        <button id="closeShopButton" class="primary-button" type="button">Done</button>
       </div>
     </div>
 

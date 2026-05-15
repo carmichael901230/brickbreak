@@ -39,6 +39,16 @@ function createSilentAudioBus() {
   };
 }
 
+function createRecordingAudioBus() {
+  const events = [];
+  return {
+    events,
+    emit(type, payload = {}) {
+      events.push({ type, payload });
+    }
+  };
+}
+
 test("clampLaunchDirection prevents near-horizontal down shots", () => {
   const direction = clampLaunchDirection({ x: 1, y: 0.01 });
   assert.ok(direction.y < 0);
@@ -98,6 +108,22 @@ test("board generator avoids spawning into occupied top-row columns", () => {
   assert.equal(generated.blocks.some((block) => block.column === 2), false);
 });
 
+test("board generator can spawn a coin without overlapping blocks or pickups", () => {
+  const generator = createBoardGenerator({
+    ...GAME_CONFIG,
+    spawn: {
+      ...GAME_CONFIG.spawn,
+      coinChance: 1
+    }
+  }, 1234);
+  const generated = generator.generateRound(1, []);
+
+  assert.equal(generated.coins.length, 1);
+  assert.equal(generated.pickups.length, 1);
+  assert.equal(generated.coins[0].column === generated.pickups[0].column, false);
+  assert.equal(generated.blocks.some((block) => block.column === generated.coins[0].column), false);
+});
+
 test("storage adapter falls back safely on corrupt settings", () => {
   const storage = createMemoryStorage({
     "arc-cascade-settings": "{bad"
@@ -111,6 +137,31 @@ test("storage adapter persists and loads best score", () => {
   const adapter = createStorageAdapter(storage);
   adapter.saveBestScore(12);
   assert.equal(adapter.loadBestScore(), 12);
+});
+
+test("storage adapter persists and loads coins", () => {
+  const storage = createMemoryStorage();
+  const adapter = createStorageAdapter(storage);
+  adapter.saveCoins(7);
+  assert.equal(adapter.loadCoins(), 7);
+});
+
+test("storage adapter persists and loads skin ownership", () => {
+  const storage = createMemoryStorage();
+  const adapter = createStorageAdapter(storage);
+  const skins = {
+    owned: {
+      brick: ["brick-sun"],
+      ball: ["ball-ice"]
+    },
+    selected: {
+      brick: "brick-sun",
+      ball: "ball-ice"
+    }
+  };
+
+  adapter.saveSkins(skins);
+  assert.deepEqual(adapter.loadSkins(), skins);
 });
 
 test("round resolves after all balls return and applies collected pickups", () => {
@@ -134,6 +185,34 @@ test("round resolves after all balls return and applies collected pickups", () =
   assert.equal(state.round, 2);
   assert.ok(state.ballsOwned >= 1);
   assert.equal(state.state, "aiming");
+});
+
+test("coins are collected on contact and emit a coin event", () => {
+  const audioBus = createRecordingAudioBus();
+  const game = createGameController({
+    boardGenerator: createRoundSequence([
+      { blocks: [], pickups: [], coins: [{ id: "c1", row: 0, column: 3, collected: false }] },
+      { blocks: [], pickups: [], coins: [] }
+    ]),
+    audioBus
+  });
+
+  const coin = game.getState().coinsOnBoard[0];
+  const position = game.getEntityPosition(coin);
+  const ball = game.getState().balls[0];
+  ball.active = true;
+  ball.returned = false;
+  ball.x = position.x + game.getState().arena.blockSize / 2;
+  ball.y = position.y + game.getState().arena.blockSize / 2;
+  ball.vx = 0;
+  ball.vy = 0;
+  game.getState().state = "resolving";
+
+  game.update(0.016);
+
+  assert.equal(game.getState().coins, 1);
+  assert.equal(game.getState().coinsOnBoard[0].collected, true);
+  assert.equal(audioBus.events.some((event) => event.type === "coin"), true);
 });
 
 test("releaseAim fires opposite to the drag direction", () => {

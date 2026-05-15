@@ -50,6 +50,7 @@ input {
 }
 
 .menu-screen {
+  position: relative;
   display: grid;
   place-items: center;
   padding: 28px 22px calc(28px + var(--safe-bottom));
@@ -96,6 +97,31 @@ input {
   margin: 0 auto;
   padding: calc(10px + var(--safe-top)) clamp(10px, 3vw, 16px) calc(14px + var(--safe-bottom));
   gap: clamp(10px, 1.8vh, 16px);
+}
+
+.coin-counter {
+  min-width: 76px;
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  color: #fbfbfb;
+  font-weight: 800;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.coin-counter img {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+}
+
+.menu-coins {
+  position: absolute;
+  top: calc(14px + var(--safe-top));
+  right: 18px;
 }
 
 .top-hud {
@@ -222,6 +248,20 @@ input {
   width: 100%;
 }
 
+.shop-button {
+  width: 100%;
+  margin-top: 22px;
+  appearance: none;
+  border: none;
+  border-radius: 999px;
+  padding: 14px 20px;
+  font-weight: 800;
+  cursor: pointer;
+  color: #f8fbff;
+  background: linear-gradient(135deg, #2f80ed, #1d4ed8);
+  box-shadow: 0 14px 30px rgba(29, 78, 216, 0.26);
+}
+
 .speed-button {
   position: absolute;
   top: 10px;
@@ -284,6 +324,137 @@ canvas {
   text-align: center;
 }
 
+#settingsOverlay .overlay-card {
+  gap: 18px;
+  padding: 28px 24px;
+}
+
+.shop-card {
+  width: min(calc(100vw - 28px), 500px);
+  max-height: min(90vh, 760px);
+  overflow: auto;
+}
+
+.shop-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+
+.shop-header h2 {
+  text-align: center;
+}
+
+.shop-banner {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: -4px auto 2px;
+  width: fit-content;
+  max-width: 100%;
+  border-radius: 999px;
+  padding: 9px 18px;
+  color: #1d1d1d;
+  background: #f2b400;
+  font-weight: 900;
+  box-shadow: 0 12px 28px rgba(242, 180, 0, 0.25);
+}
+
+.shop-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.shop-tab {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  padding: 10px 14px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.08);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.shop-tab.is-active {
+  background: #2f80ed;
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.shop-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding-bottom: 6px;
+}
+
+.skin-item {
+  min-height: 158px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  padding: 12px 8px;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 9px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.skin-sample {
+  width: min(74px, 18vw);
+  height: min(74px, 18vw);
+}
+
+.skin-sample.brick {
+  border: 2px solid rgba(255, 255, 255, 0.18);
+}
+
+.skin-sample.ball {
+  border-radius: 50%;
+  box-shadow: 0 0 18px currentColor;
+}
+
+.skin-price {
+  min-height: 34px;
+  border: 0;
+  border-radius: 999px;
+  padding: 7px 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 78px;
+  color: #1d1d1d;
+  background: #0ea5a6;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.skin-price img {
+  width: 22px;
+  height: 22px;
+}
+
+.skin-price.owned {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.skin-price.selected {
+  color: #1d1d1d;
+  background: #86efac;
+}
+
+.shop-message {
+  min-height: 1.2em;
+  margin: 0;
+  color: var(--muted);
+  text-align: center;
+  font-size: 0.9rem;
+}
+
 .overlay-copy {
   margin: 0 0 6px;
   text-align: center;
@@ -293,10 +464,17 @@ canvas {
 .sound-toggle {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: space-between;
   gap: 10px;
   color: var(--muted);
-  padding: 12px 0;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.sound-toggle input {
+  width: 22px;
+  height: 22px;
 }
 
 @media (max-height: 740px) {
@@ -330,5 +508,15 @@ canvas {
   .app-shell {
     max-width: 540px;
     box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 40px 90px rgba(0, 0, 0, 0.45);
+  }
+}
+
+@media (max-width: 360px) {
+  .shop-grid {
+    gap: 8px;
+  }
+
+  .skin-item {
+    min-height: 142px;
   }
 }

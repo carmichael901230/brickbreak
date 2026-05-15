@@ -29,11 +29,60 @@ function mixChannel(start, end, progress) {
   return Math.round(start + (end - start) * progress);
 }
 
+function parseHexColor(color) {
+  const normalized = color?.replace("#", "");
+  if (!normalized || !/^[\da-f]{6}$/i.test(normalized)) {
+    return null;
+  }
+
+  return {
+    r: Number.parseInt(normalized.slice(0, 2), 16),
+    g: Number.parseInt(normalized.slice(2, 4), 16),
+    b: Number.parseInt(normalized.slice(4, 6), 16)
+  };
+}
+
+function darkenSkinColor(color, lifeRatio) {
+  const rgb = parseHexColor(color);
+  if (!rgb) {
+    return color;
+  }
+
+  const shade = 0.36 + Math.max(0, Math.min(1, lifeRatio)) * 0.64;
+  return `rgba(${Math.round(rgb.r * shade)}, ${Math.round(rgb.g * shade)}, ${Math.round(rgb.b * shade)}, 0.92)`;
+}
+
+function createImageAsset(src) {
+  if (typeof Image === "undefined") {
+    return { image: null, loaded: false };
+  }
+
+  const image = new Image();
+  const asset = { image, loaded: false };
+  image.onload = () => {
+    asset.loaded = true;
+  };
+  image.onerror = () => {
+    asset.loaded = false;
+  };
+  image.src = src;
+  return asset;
+}
+
+function findSkinColor(config, type, skinId) {
+  return config.skins?.[type]?.find((skin) => skin.id === skinId)?.color ?? null;
+}
+
+function selectedBallColor(state, config) {
+  return findSkinColor(config, "ball", state.skins?.selected?.ball) ?? "#eff9ff";
+}
+
 export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
   const context = canvas.getContext("2d");
   const autoResize = options.autoResize !== false;
   const pixelRatio = options.pixelRatio || globalThis.devicePixelRatio || 1;
   const showRoundBanner = options.showRoundBanner !== false;
+  const coinAsset = options.coinAsset || createImageAsset("src/assets/pic/dollar.png");
 
   function drawScene(state, resolveEntityPosition) {
     drawBackground();
@@ -41,6 +90,7 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
     drawFailLine(state);
     drawBlocks(state, resolveEntityPosition);
     drawPickups(state, resolveEntityPosition);
+    drawCoins(state, resolveEntityPosition);
     drawAimGuide(state);
     drawBalls(state);
     drawParticles(state);
@@ -179,7 +229,10 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
       const { x, y } = resolveEntityPosition(block);
       const visibleRect = getVisibleBrickRect(state, config, x, y);
       const lifeRatio = Math.max(0, Math.min(1, block.hp / Math.max(1, block.maxHp ?? block.hp)));
-      const fill = `rgba(${mixChannel(74, 200, lifeRatio)}, ${mixChannel(102, 224, lifeRatio)}, ${mixChannel(132, 255, lifeRatio)}, 0.92)`;
+      const brickSkinColor = findSkinColor(config, "brick", state.skins?.selected?.brick);
+      const fill = brickSkinColor
+        ? darkenSkinColor(brickSkinColor, lifeRatio)
+        : `rgba(${mixChannel(74, 200, lifeRatio)}, ${mixChannel(102, 224, lifeRatio)}, ${mixChannel(132, 255, lifeRatio)}, 0.92)`;
       context.fillStyle = fill;
       context.fillRect(visibleRect.x, visibleRect.y, visibleRect.size, visibleRect.size);
 
@@ -226,6 +279,47 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
     }
   }
 
+  function drawCoins(state, resolveEntityPosition) {
+    for (const coin of state.coinsOnBoard ?? []) {
+      if (coin.collected) {
+        continue;
+      }
+
+      const { x, y } = resolveEntityPosition(coin);
+      const centerX = x + state.arena.blockSize / 2;
+      const centerY = y + state.arena.blockSize / 2;
+      const iconSize = config.coinRadius * 2.2;
+
+      context.save();
+      context.beginPath();
+      context.arc(centerX, centerY, config.coinRadius * 1.1, 0, Math.PI * 2);
+      context.fillStyle = "rgba(255, 215, 96, 0.18)";
+      context.fill();
+
+      if (coinAsset.loaded && coinAsset.image) {
+        context.drawImage(
+          coinAsset.image,
+          centerX - iconSize / 2,
+          centerY - iconSize / 2,
+          iconSize,
+          iconSize
+        );
+      } else {
+        context.beginPath();
+        context.arc(centerX, centerY, config.coinRadius, 0, Math.PI * 2);
+        context.fillStyle = "#f2b400";
+        context.fill();
+        context.fillStyle = "#1d1d1d";
+        context.font = "700 24px 'Segoe UI'";
+        context.textAlign = "center";
+        context.textBaseline = "middle";
+        context.fillText("$", centerX, centerY + 1);
+      }
+
+      context.restore();
+    }
+  }
+
   function drawAimGuide(state) {
     if (!state.aiming || !state.aimPoint) {
       return;
@@ -251,7 +345,7 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
 
       context.beginPath();
       context.arc(ball.x, ball.y, config.ballRadius, 0, Math.PI * 2);
-      context.fillStyle = "#eff9ff";
+      context.fillStyle = selectedBallColor(state, config);
       context.shadowBlur = 18;
       context.shadowColor = "rgba(121, 224, 255, 0.75)";
       context.fill();
@@ -264,7 +358,7 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
       context.beginPath();
       context.arc(particle.x, particle.y, 3, 0, Math.PI * 2);
       const alpha = particle.life / particle.maxLife;
-      context.fillStyle = particle.tone === "pickup"
+      context.fillStyle = particle.tone === "pickup" || particle.tone === "coin"
         ? alphaColor("#ffcf8c", alpha)
         : alphaColor("#a8efff", alpha);
       context.fill();
@@ -280,7 +374,7 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
     context.fill();
     context.beginPath();
     context.arc(state.launcherX, state.arena.launcherY, 10, 0, Math.PI * 2);
-    context.fillStyle = "#ffcc80";
+    context.fillStyle = selectedBallColor(state, config);
     context.fill();
 
     // Keep the ball count anchored to the launcher so the player can read volley size at a glance.

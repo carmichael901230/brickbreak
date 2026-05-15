@@ -33,6 +33,31 @@ test("storage adapter persists and loads best score", () => {
   assert.equal(adapter.loadBestScore(), 12);
 });
 
+test("storage adapter persists and loads coins", () => {
+  const storage = createMemoryStorage();
+  const adapter = createStorageAdapter(storage);
+  adapter.saveCoins(7);
+  assert.equal(adapter.loadCoins(), 7);
+});
+
+test("storage adapter persists and loads skin ownership", () => {
+  const storage = createMemoryStorage();
+  const adapter = createStorageAdapter(storage);
+  const skins = {
+    owned: {
+      brick: ["brick-sun"],
+      ball: ["ball-ice"]
+    },
+    selected: {
+      brick: "brick-sun",
+      ball: "ball-ice"
+    }
+  };
+
+  adapter.saveSkins(skins);
+  assert.deepEqual(adapter.loadSkins(), skins);
+});
+
 test("storage adapter persists and clears saved game progress", () => {
   const storage = createMemoryStorage();
   const adapter = createStorageAdapter(storage);

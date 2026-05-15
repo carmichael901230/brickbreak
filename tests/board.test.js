@@ -30,3 +30,19 @@ test("board generator avoids spawning into occupied top-row columns", () => {
   const generated = generator.generateRound(3, [{ row: 0, column: 2 }]);
   assert.equal(generated.blocks.some((block) => block.column === 2), false);
 });
+
+test("board generator can spawn a coin without overlapping blocks or pickups", () => {
+  const generator = createBoardGenerator({
+    ...GAME_CONFIG,
+    spawn: {
+      ...GAME_CONFIG.spawn,
+      coinChance: 1
+    }
+  }, 1234);
+  const generated = generator.generateRound(1, []);
+
+  assert.equal(generated.coins.length, 1);
+  assert.equal(generated.pickups.length, 1);
+  assert.equal(generated.coins[0].column === generated.pickups[0].column, false);
+  assert.equal(generated.blocks.some((block) => block.column === generated.coins[0].column), false);
+});

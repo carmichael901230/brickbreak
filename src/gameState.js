@@ -52,6 +52,19 @@ function cloneSerializable(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function normalizeSkins(skins) {
+  return {
+    owned: {
+      brick: Array.isArray(skins?.owned?.brick) ? skins.owned.brick.filter((id) => typeof id === "string") : [],
+      ball: Array.isArray(skins?.owned?.ball) ? skins.owned.ball.filter((id) => typeof id === "string") : []
+    },
+    selected: {
+      brick: typeof skins?.selected?.brick === "string" ? skins.selected.brick : null,
+      ball: typeof skins?.selected?.ball === "string" ? skins.selected.ball : null
+    }
+  };
+}
+
 function restoreNumber(value, fallback) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
@@ -74,7 +87,7 @@ function restorePoint(value, fallback = null) {
   return { x, y };
 }
 
-export function createInitialGameState(config = GAME_CONFIG) {
+export function createInitialGameState(config = GAME_CONFIG, coins = 0, skins = null) {
   const arena = buildArena(config);
 
   return {
@@ -83,6 +96,8 @@ export function createInitialGameState(config = GAME_CONFIG) {
     round: 1,
     score: 0,
     bestScore: 0,
+    coins: Math.max(0, Math.floor(coins)),
+    skins: normalizeSkins(skins),
     ballsOwned: 1,
     ballsLaunched: 0,
     returnedBalls: 0,
@@ -100,6 +115,7 @@ export function createInitialGameState(config = GAME_CONFIG) {
     state: "aiming",
     blocks: [],
     pickups: [],
+    coinsOnBoard: [],
     balls: [createBall(config.width / 2, arena.launcherY)],
     particles: [],
     bannerTimer: config.effects.roundBannerTime,
@@ -110,10 +126,12 @@ export function createInitialGameState(config = GAME_CONFIG) {
 
 export function createGameController({
   config = GAME_CONFIG,
+  initialCoins = 0,
+  initialSkins = null,
   boardGenerator,
   audioBus
 }) {
-  let gameState = createInitialGameState(config);
+  let gameState = createInitialGameState(config, initialCoins, initialSkins);
 
   function resolveAimPreview(point) {
     const dragVector = {
@@ -168,13 +186,19 @@ export function createGameController({
     // The board advances first, then we add the new top row so every round feels like downward pressure.
     gameState.blocks = gameState.blocks.map((block) => ({ ...block, row: block.row + 1 }));
     gameState.pickups = gameState.pickups.map((pickup) => ({ ...pickup, row: pickup.row + 1 }));
+    gameState.coinsOnBoard = gameState.coinsOnBoard.map((coin) => ({ ...coin, row: coin.row + 1 }));
     gameState.pickups = gameState.pickups.filter((pickup) => {
       const position = getEntityPosition(gameState.arena, config, pickup);
+      return position.y + gameState.arena.blockSize < gameState.arena.failLineY;
+    });
+    gameState.coinsOnBoard = gameState.coinsOnBoard.filter((coin) => {
+      const position = getEntityPosition(gameState.arena, config, coin);
       return position.y + gameState.arena.blockSize < gameState.arena.failLineY;
     });
 
     gameState.blocks.push(...generated.blocks);
     gameState.pickups.push(...generated.pickups);
+    gameState.coinsOnBoard.push(...(generated.coins ?? []));
     gameState.bannerTimer = config.effects.roundBannerTime;
     gameState.score = Math.max(gameState.score, gameState.round - 1);
 
@@ -192,7 +216,7 @@ export function createGameController({
   }
 
   function restart() {
-    gameState = createInitialGameState(config);
+    gameState = createInitialGameState(config, gameState.coins, gameState.skins);
     spawnRound();
   }
 
@@ -205,6 +229,7 @@ export function createGameController({
       round: gameState.round,
       score: gameState.score,
       bestScore: gameState.bestScore,
+      skins: gameState.skins,
       ballsOwned: gameState.ballsOwned,
       ballsLaunched: gameState.ballsLaunched,
       returnedBalls: gameState.returnedBalls,
@@ -222,6 +247,7 @@ export function createGameController({
       state: gameState.state,
       blocks: gameState.blocks,
       pickups: gameState.pickups,
+      coinsOnBoard: gameState.coinsOnBoard,
       balls: gameState.balls,
       particles: gameState.particles,
       bannerTimer: gameState.bannerTimer,
@@ -234,7 +260,7 @@ export function createGameController({
       return false;
     }
 
-    const nextState = createInitialGameState(config);
+    const nextState = createInitialGameState(config, gameState.coins, gameState.skins);
     const allowedStates = new Set(["aiming", "launching", "resolving"]);
     if (!allowedStates.has(snapshot.state)) {
       return false;
@@ -243,6 +269,7 @@ export function createGameController({
     nextState.round = Math.max(1, Math.floor(restoreNumber(snapshot.round, nextState.round)));
     nextState.score = Math.max(0, Math.floor(restoreNumber(snapshot.score, nextState.score)));
     nextState.bestScore = Math.max(0, Math.floor(restoreNumber(snapshot.bestScore, nextState.bestScore)));
+    nextState.skins = normalizeSkins(snapshot.skins ?? nextState.skins);
     nextState.ballsOwned = Math.max(1, Math.floor(restoreNumber(snapshot.ballsOwned, nextState.ballsOwned)));
     nextState.ballsLaunched = Math.max(0, Math.floor(restoreNumber(snapshot.ballsLaunched, nextState.ballsLaunched)));
     nextState.returnedBalls = Math.max(0, Math.floor(restoreNumber(snapshot.returnedBalls, nextState.returnedBalls)));
@@ -267,6 +294,9 @@ export function createGameController({
     }
     if (Array.isArray(snapshot.pickups)) {
       nextState.pickups = cloneSerializable(snapshot.pickups);
+    }
+    if (Array.isArray(snapshot.coinsOnBoard)) {
+      nextState.coinsOnBoard = cloneSerializable(snapshot.coinsOnBoard);
     }
     if (Array.isArray(snapshot.balls) && snapshot.balls.length > 0) {
       nextState.balls = cloneSerializable(snapshot.balls);
@@ -379,6 +409,13 @@ export function createGameController({
     audioBus.emit("pickup");
   }
 
+  function collectCoin(coin, ball) {
+    coin.collected = true;
+    gameState.coins += 1;
+    addParticle(ball.x, ball.y, "coin");
+    audioBus.emit("coin", { coins: gameState.coins });
+  }
+
   function damageBlock(block, position) {
     block.hp -= 1;
     block.hitFlash = config.effects.hitFlashTime;
@@ -447,6 +484,19 @@ export function createGameController({
         }
       }
 
+      for (const coin of gameState.coinsOnBoard) {
+        if (coin.collected) {
+          continue;
+        }
+
+        const position = getEntityPosition(gameState.arena, config, coin);
+        const centerX = position.x + gameState.arena.blockSize / 2;
+        const centerY = position.y + gameState.arena.blockSize / 2;
+        if (Math.hypot(ball.x - centerX, ball.y - centerY) <= config.ballRadius + config.coinRadius) {
+          collectCoin(coin, ball);
+        }
+      }
+
       if (ball.y >= config.settleThreshold) {
         ball.y = gameState.arena.launcherY;
         ball.active = false;
@@ -480,6 +530,7 @@ export function createGameController({
 
     const collected = gameState.pickups.filter((pickup) => pickup.collected).length;
     gameState.pickups = gameState.pickups.filter((pickup) => !pickup.collected);
+    gameState.coinsOnBoard = gameState.coinsOnBoard.filter((coin) => !coin.collected);
     gameState.ballsOwned += collected;
     gameState.round += 1;
     gameState.launcherTargetX = gameState.firstReturnX ?? gameState.launcherX;
@@ -562,6 +613,20 @@ export function createGameController({
     return true;
   }
 
+  function spendCoins(amount) {
+    const normalizedAmount = Math.max(0, Math.floor(amount));
+    if (gameState.coins < normalizedAmount) {
+      return false;
+    }
+
+    gameState.coins -= normalizedAmount;
+    return true;
+  }
+
+  function setSkins(skins) {
+    gameState.skins = normalizeSkins(skins);
+  }
+
   spawnRound();
 
   return {
@@ -569,6 +634,8 @@ export function createGameController({
     exportSnapshot,
     importSnapshot,
     restart,
+    setSkins,
+    spendCoins,
     startAim,
     updateAim,
     releaseAim,

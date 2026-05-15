@@ -5,12 +5,40 @@ const defaultSettings = {
   language: "zh-CN"
 };
 
+const defaultSkins = {
+  owned: {
+    brick: [],
+    ball: []
+  },
+  selected: {
+    brick: null,
+    ball: null
+  }
+};
+
 function safeParse(rawValue, fallback) {
   try {
     return rawValue ? JSON.parse(rawValue) : fallback;
   } catch {
     return fallback;
   }
+}
+
+function normalizeStringList(value) {
+  return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+}
+
+function normalizeSkins(skins) {
+  return {
+    owned: {
+      brick: normalizeStringList(skins?.owned?.brick),
+      ball: normalizeStringList(skins?.owned?.ball)
+    },
+    selected: {
+      brick: typeof skins?.selected?.brick === "string" ? skins.selected.brick : null,
+      ball: typeof skins?.selected?.ball === "string" ? skins.selected.ball : null
+    }
+  };
 }
 
 export function createStorageAdapter(storage = globalThis.localStorage) {
@@ -47,6 +75,39 @@ export function createStorageAdapter(storage = globalThis.localStorage) {
       }
 
       storage.setItem(STORAGE_KEYS.bestScore, String(Math.max(0, Math.floor(score))));
+    },
+
+    loadCoins() {
+      if (!storage) {
+        return 0;
+      }
+
+      const value = Number(storage.getItem(STORAGE_KEYS.coins));
+      return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+    },
+
+    saveCoins(coins) {
+      if (!storage) {
+        return;
+      }
+
+      storage.setItem(STORAGE_KEYS.coins, String(Math.max(0, Math.floor(coins))));
+    },
+
+    loadSkins() {
+      if (!storage) {
+        return normalizeSkins(defaultSkins);
+      }
+
+      return normalizeSkins(safeParse(storage.getItem(STORAGE_KEYS.skins), defaultSkins));
+    },
+
+    saveSkins(skins) {
+      if (!storage) {
+        return;
+      }
+
+      storage.setItem(STORAGE_KEYS.skins, JSON.stringify(normalizeSkins(skins)));
     },
 
     loadGameProgress() {

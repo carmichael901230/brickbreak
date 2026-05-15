@@ -28,12 +28,24 @@ export function createBoardGenerator(config = GAME_CONFIG, random = Math.random)
       // Keep the logical board dense and gapless; rendering can add visual spacing later.
       const normalizedRound = Math.max(1, Math.floor(round));
       const pickupColumn = Math.floor(rng() * config.columns);
-      const maxSpawnableBlocks = Math.max(0, config.columns - 1);
+      const coinAllowed = rng() < (config.spawn.coinChance ?? 0);
+      const reservedColumns = new Set([pickupColumn]);
+      const coinCandidates = Array.from({ length: config.columns }, (_, index) => index).filter(
+        (column) => !reservedColumns.has(column)
+      );
+      const coinColumn = coinAllowed && coinCandidates.length > 0
+        ? coinCandidates[Math.floor(rng() * coinCandidates.length)]
+        : null;
+      if (coinColumn !== null) {
+        reservedColumns.add(coinColumn);
+      }
+
+      const maxSpawnableBlocks = Math.max(0, config.columns - reservedColumns.size);
       const minBlocks = Math.min(maxSpawnableBlocks, normalizedRound);
       const maxBlocks = Math.min(maxSpawnableBlocks, normalizedRound * 2);
       const blockCount = minBlocks + Math.floor(rng() * (maxBlocks - minBlocks + 1));
-      const columns = chooseColumns(blockCount + 1)
-        .filter((column) => column !== pickupColumn)
+      const columns = chooseColumns(blockCount + reservedColumns.size)
+        .filter((column) => !reservedColumns.has(column))
         .slice(0, blockCount);
 
       const occupied = new Set();
@@ -67,7 +79,18 @@ export function createBoardGenerator(config = GAME_CONFIG, random = Math.random)
             }
           ];
 
-      return { blocks, pickups };
+      const coins = coinColumn === null
+        ? []
+        : [
+            {
+              id: `coin-${round}-${coinColumn}`,
+              column: coinColumn,
+              row: 0,
+              collected: false
+            }
+          ];
+
+      return { blocks, pickups, coins };
     }
   };
 }
