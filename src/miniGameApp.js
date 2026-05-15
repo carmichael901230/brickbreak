@@ -117,6 +117,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let bestScore = storage.loadBestScore();
   let touchStart = null;
   let lastTime = Date.now();
+  let hasStartedRun = false;
   const scheduleFrame =
     globalThis.requestAnimationFrame?.bind(globalThis) ||
     wxApi.requestAnimationFrame?.bind(wxApi) ||
@@ -175,8 +176,20 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
   function startRun() {
     game.restart();
+    hasStartedRun = true;
     screen = "game";
     overlay = null;
+  }
+
+  function playFromMenu() {
+    if (hasStartedRun && game.getState().state !== "gameover") {
+      screen = "game";
+      overlay = null;
+      pointerActive = false;
+      return;
+    }
+
+    startRun();
   }
 
   function goToMenu() {
@@ -248,6 +261,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   function handleButton(id) {
     switch (id) {
       case "play":
+        playFromMenu();
+        break;
       case "restart":
         startRun();
         break;

@@ -48,6 +48,7 @@ const game = createGameController({
 const renderer = createRenderer(canvas, GAME_CONFIG);
 let appScreen = "menu";
 let overlayScreen = null;
+let hasStartedRun = false;
 
 function setStatus(message) {
   statusText.textContent = message;
@@ -137,6 +138,7 @@ createInputController(gameScreen, canvas, game, setStatus);
 
 function startRun() {
   game.restart();
+  hasStartedRun = true;
   appScreen = "game";
   overlayScreen = null;
   syncScreenState();
@@ -144,7 +146,18 @@ function startRun() {
   setStatus("Fresh run ready. Drag to line up the first shot.");
 }
 
-playButton.addEventListener("click", startRun);
+playButton.addEventListener("click", () => {
+  if (hasStartedRun && game.getState().state !== "gameover") {
+    appScreen = "game";
+    overlayScreen = null;
+    syncScreenState();
+    syncHud();
+    setStatus("Run resumed. Drag to line up the next shot.");
+    return;
+  }
+
+  startRun();
+});
 
 pauseButton.addEventListener("click", () => {
   if (appScreen !== "game") {

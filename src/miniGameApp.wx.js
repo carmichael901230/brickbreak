@@ -212,6 +212,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let tutorialDismissed = false;
   let lastSavedProgressJson = null;
   let lastSavedProgressAt = 0;
+  let hasStartedRun = false;
 
   const scheduleFrame =
     globalThis.requestAnimationFrame?.bind(globalThis) ||
@@ -318,6 +319,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     screen = "game";
     overlay = "pause";
+    hasStartedRun = true;
     bestScore = Math.max(bestScore, Number(progress.bestScore) || 0);
     tutorialIdleTime = 0;
     tutorialDismissed = true;
@@ -327,7 +329,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   function startRun() {
+    clearSavedProgress();
     game.restart();
+    hasStartedRun = true;
     screen = "game";
     overlay = null;
     tutorialIdleTime = 0;
@@ -335,12 +339,32 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     persistProgress(true);
   }
 
+  function playFromMenu() {
+    if (hasStartedRun && game.getState().state !== "gameover") {
+      screen = "game";
+      overlay = null;
+      pointerActive = false;
+      tutorialIdleTime = 0;
+      persistProgress(true);
+      return;
+    }
+
+    if (tryResumeSavedProgress()) {
+      overlay = null;
+      return;
+    }
+
+    startRun();
+  }
+
   function goToMenu() {
+    if (screen === "game" && game.getState().state !== "gameover") {
+      persistProgress(true);
+    }
     overlay = null;
     screen = "menu";
     pointerActive = false;
     tutorialIdleTime = 0;
-    clearSavedProgress();
   }
 
   function shouldShowTutorial(state) {
@@ -435,6 +459,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   function handleButton(id) {
     switch (id) {
       case "play":
+        playFromMenu();
+        break;
       case "restart":
         startRun();
         break;
@@ -808,6 +834,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       game.update(deltaTime);
       if (game.getState().state === "gameover") {
         overlay = "gameover";
+        hasStartedRun = false;
         clearSavedProgress();
       }
     }

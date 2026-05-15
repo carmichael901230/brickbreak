@@ -18,7 +18,7 @@ export const GAME_CONFIG = {
   maxLaunchAngle: Math.PI - 0.22,
   minLaunchAngle: 0.22,
   settleThreshold: 912,
-  pickupRadius: 11,
+  pickupRadius: 22,
   failLineOffset: 110,
   spawn: {
     minBlocks: 2,

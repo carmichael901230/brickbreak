@@ -26,15 +26,15 @@ export function createBoardGenerator(config = GAME_CONFIG, random = Math.random)
   return {
     generateRound(round, boardBlocks) {
       // Keep the logical board dense and gapless; rendering can add visual spacing later.
-      const blockCap = Math.min(
-        config.spawn.maxBlocks,
-        config.spawn.minBlocks + Math.floor(round * config.spawn.blockChanceRamp * config.columns) + 1
-      );
-      const blockCount = Math.max(
-        config.spawn.minBlocks,
-        Math.min(blockCap, 1 + Math.floor(rng() * (blockCap + 1)))
-      );
-      const columns = chooseColumns(blockCount);
+      const normalizedRound = Math.max(1, Math.floor(round));
+      const pickupColumn = Math.floor(rng() * config.columns);
+      const maxSpawnableBlocks = Math.max(0, config.columns - 1);
+      const minBlocks = Math.min(maxSpawnableBlocks, normalizedRound);
+      const maxBlocks = Math.min(maxSpawnableBlocks, normalizedRound * 2);
+      const blockCount = minBlocks + Math.floor(rng() * (maxBlocks - minBlocks + 1));
+      const columns = chooseColumns(blockCount + 1)
+        .filter((column) => column !== pickupColumn)
+        .slice(0, blockCount);
 
       const occupied = new Set();
       for (const block of boardBlocks) {
@@ -55,14 +55,6 @@ export function createBoardGenerator(config = GAME_CONFIG, random = Math.random)
             maxHp: hp
           };
         });
-
-      const pickupAllowed = round <= config.spawn.guaranteedPickupRounds || rng() < config.spawn.pickupChance;
-      const freeColumns = Array.from({ length: config.columns }, (_, index) => index).filter(
-        (column) => !blocks.some((block) => block.column === column)
-      );
-      const pickupColumn = pickupAllowed && freeColumns.length > 0
-        ? freeColumns[Math.floor(rng() * freeColumns.length)]
-        : null;
 
       const pickups = pickupColumn === null
         ? []

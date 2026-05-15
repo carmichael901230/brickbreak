@@ -45,6 +45,7 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
     drawBalls(state);
     drawParticles(state);
     drawLauncher(state);
+    drawDangerGlow(state, resolveEntityPosition);
     if (showRoundBanner) {
       drawBanner(state);
     }
@@ -110,6 +111,66 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
     context.moveTo(config.sidePadding, state.arena.failLineY);
     context.lineTo(config.width - config.sidePadding, state.arena.failLineY);
     context.stroke();
+    context.restore();
+  }
+
+  function hasBrickNearFailLine(state, resolveEntityPosition) {
+    if (state.state === "gameover") {
+      return false;
+    }
+
+    return state.blocks.some((block) => {
+      if (block.hp <= 0) {
+        return false;
+      }
+
+      const position = resolveEntityPosition(block);
+      const blockBottom = position.y + state.arena.blockSize;
+      return blockBottom >= state.arena.failLineY - state.arena.blockSize;
+    });
+  }
+
+  function drawDangerGlow(state, resolveEntityPosition) {
+    if (!hasBrickNearFailLine(state, resolveEntityPosition)) {
+      return;
+    }
+
+    const timeNow = globalThis.performance?.now?.() ?? Date.now();
+    const pulse = 0.72 + Math.sin(timeNow * 0.008) * 0.18;
+    const edgeSize = 54;
+    const red = `rgba(255, 54, 54, ${0.34 * pulse})`;
+    const clear = "rgba(255, 54, 54, 0)";
+
+    context.save();
+    context.globalCompositeOperation = "screen";
+
+    const top = context.createLinearGradient(0, 0, 0, edgeSize);
+    top.addColorStop(0, red);
+    top.addColorStop(1, clear);
+    context.fillStyle = top;
+    context.fillRect(0, 0, config.width, edgeSize);
+
+    const bottom = context.createLinearGradient(0, config.height, 0, config.height - edgeSize);
+    bottom.addColorStop(0, red);
+    bottom.addColorStop(1, clear);
+    context.fillStyle = bottom;
+    context.fillRect(0, config.height - edgeSize, config.width, edgeSize);
+
+    const left = context.createLinearGradient(0, 0, edgeSize, 0);
+    left.addColorStop(0, red);
+    left.addColorStop(1, clear);
+    context.fillStyle = left;
+    context.fillRect(0, 0, edgeSize, config.height);
+
+    const right = context.createLinearGradient(config.width, 0, config.width - edgeSize, 0);
+    right.addColorStop(0, red);
+    right.addColorStop(1, clear);
+    context.fillStyle = right;
+    context.fillRect(config.width - edgeSize, 0, edgeSize, config.height);
+
+    context.strokeStyle = `rgba(255, 88, 88, ${0.45 * pulse})`;
+    context.lineWidth = 8;
+    context.strokeRect(4, 4, config.width - 8, config.height - 8);
     context.restore();
   }
 
