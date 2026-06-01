@@ -192,11 +192,24 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   const tutorialAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/tap.png");
   const settingsIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/settings.png");
   const coinIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/dollar.png");
+  const ballSkinAssets = Object.fromEntries(
+    GAME_CONFIG.skins.ball
+      .map((skin) => skin.gameImage ?? skin.image)
+      .filter(Boolean)
+      .map((image) => [image, loadImageAsset(wxApi, canvas, image)])
+  );
+  const shopBallSkinAssets = Object.fromEntries(
+    GAME_CONFIG.skins.ball
+      .map((skin) => skin.storeImage ?? skin.image)
+      .filter(Boolean)
+      .map((image) => [image, loadImageAsset(wxApi, canvas, image)])
+  );
   const renderer = createRenderer(canvas, GAME_CONFIG, {
     autoResize: false,
     pixelRatio,
     showRoundBanner: false,
-    coinAsset: coinIconAsset
+    coinAsset: coinIconAsset,
+    ballSkinAssets
   });
   renderer.context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
   const hitSoundPlayer = createSoundPlayer(wxApi, "src/assets/sound/bubble_sound.m4a", {
@@ -731,13 +744,25 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     context.lineWidth = 1;
     context.stroke();
 
-    context.fillStyle = skin.color;
     if (category === "ball") {
-      context.beginPath();
-      context.arc(sampleX, sampleY, sampleSize / 2, 0, Math.PI * 2);
-      context.fill();
+      const storeImage = skin.storeImage ?? skin.image;
+      const asset = storeImage ? shopBallSkinAssets[storeImage] : null;
+      if (asset?.loaded && asset.image) {
+        context.drawImage(
+          asset.image,
+          sampleX - sampleSize / 2,
+          sampleY - sampleSize / 2,
+          sampleSize,
+          sampleSize
+        );
+      } else {
+        context.fillStyle = skin.color;
+        context.beginPath();
+        context.arc(sampleX, sampleY, sampleSize / 2, 0, Math.PI * 2);
+        context.fill();
+      }
     } else {
-      context.fillRect(sampleX - sampleSize / 2, sampleY - sampleSize / 2, sampleSize, sampleSize);
+      drawBrickSample(context, sampleX - sampleSize / 2, sampleY - sampleSize / 2, sampleSize, skin);
     }
 
     const label = selected ? texts.selected : owned ? texts.use : pending ? texts.buy : String(skin.price);
@@ -761,6 +786,144 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     if (!owned && !pending && coinIconAsset.loaded && coinIconAsset.image) {
       context.drawImage(coinIconAsset.image, sampleX + 14, priceY - 9, 18, 18);
     }
+  }
+
+  function drawBrickSample(context, x, y, size, skin) {
+    const centerX = x + size / 2;
+    const centerY = y + size / 2;
+    const accent = skin.accent ?? "rgba(255,255,255,0.72)";
+
+    context.save();
+    context.fillStyle = skin.color;
+    context.fillRect(x, y, size, size);
+    context.beginPath();
+    context.rect(x, y, size, size);
+    context.clip();
+
+    context.globalAlpha = 0.72;
+    context.strokeStyle = accent;
+    context.fillStyle = accent;
+    context.lineWidth = Math.max(2, size * 0.05);
+
+    if (skin.pattern === "sunburst") {
+      for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 4) {
+        context.beginPath();
+        context.moveTo(centerX, centerY);
+        context.lineTo(centerX + Math.cos(angle) * size, centerY + Math.sin(angle) * size);
+        context.stroke();
+      }
+      context.beginPath();
+      context.arc(centerX, centerY, size * 0.22, 0, Math.PI * 2);
+      context.fill();
+    } else if (skin.pattern === "candy") {
+      context.lineWidth = Math.max(7, size * 0.15);
+      for (let offset = -size; offset < size * 2; offset += size * 0.42) {
+        context.beginPath();
+        context.moveTo(x + offset, y + size);
+        context.lineTo(x + offset + size, y);
+        context.stroke();
+      }
+    } else if (skin.pattern === "heart") {
+      context.beginPath();
+      context.arc(x + size * 0.4, y + size * 0.38, size * 0.13, 0, Math.PI * 2);
+      context.arc(x + size * 0.6, y + size * 0.38, size * 0.13, 0, Math.PI * 2);
+      context.moveTo(x + size * 0.28, y + size * 0.45);
+      context.lineTo(centerX, y + size * 0.72);
+      context.lineTo(x + size * 0.72, y + size * 0.45);
+      context.closePath();
+      context.fill();
+    } else if (skin.pattern === "prism") {
+      context.beginPath();
+      context.moveTo(centerX, y + size * 0.12);
+      context.lineTo(x + size * 0.84, centerY);
+      context.lineTo(centerX, y + size * 0.88);
+      context.lineTo(x + size * 0.16, centerY);
+      context.closePath();
+      context.stroke();
+      context.beginPath();
+      context.moveTo(centerX, y + size * 0.12);
+      context.lineTo(centerX, y + size * 0.88);
+      context.moveTo(x + size * 0.16, centerY);
+      context.lineTo(x + size * 0.84, centerY);
+      context.stroke();
+    } else if (skin.pattern === "ice") {
+      context.lineWidth = Math.max(1.5, size * 0.03);
+      context.beginPath();
+      context.moveTo(x + size * 0.18, y + size * 0.22);
+      context.lineTo(x + size * 0.82, y + size * 0.38);
+      context.lineTo(x + size * 0.58, y + size * 0.86);
+      context.moveTo(x + size * 0.28, y + size * 0.78);
+      context.lineTo(x + size * 0.48, y + size * 0.16);
+      context.lineTo(x + size * 0.88, y + size * 0.72);
+      context.stroke();
+    } else if (skin.pattern === "circuit") {
+      const tracks = [
+        [0.16, 0.28, 0.78, 0.28],
+        [0.22, 0.54, 0.68, 0.54],
+        [0.34, 0.78, 0.84, 0.78]
+      ];
+      for (const [x1, y1, x2, y2] of tracks) {
+        context.beginPath();
+        context.moveTo(x + size * x1, y + size * y1);
+        context.lineTo(x + size * x2, y + size * y2);
+        context.stroke();
+        context.beginPath();
+        context.arc(x + size * x2, y + size * y2, size * 0.045, 0, Math.PI * 2);
+        context.fill();
+      }
+    } else if (skin.pattern === "slime") {
+      context.beginPath();
+      context.arc(x + size * 0.28, y + size * 0.32, size * 0.1, 0, Math.PI * 2);
+      context.arc(x + size * 0.7, y + size * 0.26, size * 0.07, 0, Math.PI * 2);
+      context.arc(x + size * 0.58, y + size * 0.72, size * 0.12, 0, Math.PI * 2);
+      context.fill();
+    } else if (skin.pattern === "leaf") {
+      context.beginPath();
+      context.ellipse(centerX, centerY, size * 0.18, size * 0.34, Math.PI / 4, 0, Math.PI * 2);
+      context.fill();
+      context.beginPath();
+      context.moveTo(x + size * 0.28, y + size * 0.72);
+      context.lineTo(x + size * 0.72, y + size * 0.28);
+      context.stroke();
+    } else if (skin.pattern === "lava") {
+      context.lineWidth = Math.max(4, size * 0.07);
+      context.beginPath();
+      context.moveTo(x + size * 0.22, y);
+      context.lineTo(x + size * 0.38, y + size * 0.34);
+      context.lineTo(x + size * 0.3, y + size * 0.58);
+      context.lineTo(x + size * 0.52, y + size);
+      context.moveTo(x + size * 0.72, y + size * 0.04);
+      context.lineTo(x + size * 0.6, y + size * 0.44);
+      context.lineTo(x + size * 0.82, y + size * 0.78);
+      context.stroke();
+    } else if (skin.pattern === "marble") {
+      context.lineWidth = Math.max(2, size * 0.035);
+      for (let offset = -0.1; offset < 1.2; offset += 0.28) {
+        context.beginPath();
+        context.moveTo(x + size * offset, y + size);
+        context.bezierCurveTo(
+          x + size * (offset + 0.18),
+          y + size * 0.72,
+          x + size * (offset - 0.05),
+          y + size * 0.36,
+          x + size * (offset + 0.22),
+          y
+        );
+        context.stroke();
+      }
+    }
+
+    context.globalAlpha = 1;
+    const shine = context.createLinearGradient(x, y, x + size, y + size);
+    shine.addColorStop(0, "rgba(255,255,255,0.24)");
+    shine.addColorStop(0.48, "rgba(255,255,255,0)");
+    shine.addColorStop(1, "rgba(0,0,0,0.18)");
+    context.fillStyle = shine;
+    context.fillRect(x, y, size, size);
+    context.strokeStyle = "rgba(255,255,255,0.18)";
+    context.lineWidth = 2;
+    context.strokeRect(x, y, size, size);
+    context.restore();
   }
 
   function drawShopOverlay(context, rect) {

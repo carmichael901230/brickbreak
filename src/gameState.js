@@ -14,6 +14,15 @@ function limitVectorLength(vector, maxLength) {
   };
 }
 
+function isLaunchAngleAllowed(vector, config) {
+  if (vector.y >= 0) {
+    return false;
+  }
+
+  const angle = Math.atan2(-vector.y, vector.x);
+  return angle >= config.minLaunchAngle && angle <= config.maxLaunchAngle;
+}
+
 function buildArena(config) {
   const playableWidth = config.width - config.sidePadding * 2;
   const blockSize =
@@ -52,15 +61,28 @@ function cloneSerializable(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function normalizeSkins(skins) {
+function getValidSkinIds(config, type) {
+  return new Set((config.skins?.[type] ?? []).filter((skin) => !skin.default).map((skin) => skin.id));
+}
+
+function normalizeSkins(skins, config = GAME_CONFIG) {
+  const validBrickIds = getValidSkinIds(config, "brick");
+  const validBallIds = getValidSkinIds(config, "ball");
+  const selectedBrick = typeof skins?.selected?.brick === "string" && validBrickIds.has(skins.selected.brick)
+    ? skins.selected.brick
+    : null;
+  const selectedBall = typeof skins?.selected?.ball === "string" && validBallIds.has(skins.selected.ball)
+    ? skins.selected.ball
+    : null;
+
   return {
     owned: {
-      brick: Array.isArray(skins?.owned?.brick) ? skins.owned.brick.filter((id) => typeof id === "string") : [],
-      ball: Array.isArray(skins?.owned?.ball) ? skins.owned.ball.filter((id) => typeof id === "string") : []
+      brick: Array.isArray(skins?.owned?.brick) ? skins.owned.brick.filter((id) => validBrickIds.has(id)) : [],
+      ball: Array.isArray(skins?.owned?.ball) ? skins.owned.ball.filter((id) => validBallIds.has(id)) : []
     },
     selected: {
-      brick: typeof skins?.selected?.brick === "string" ? skins.selected.brick : null,
-      ball: typeof skins?.selected?.ball === "string" ? skins.selected.ball : null
+      brick: selectedBrick,
+      ball: selectedBall
     }
   };
 }
@@ -97,7 +119,7 @@ export function createInitialGameState(config = GAME_CONFIG, coins = 0, skins = 
     score: 0,
     bestScore: 0,
     coins: Math.max(0, Math.floor(coins)),
-    skins: normalizeSkins(skins),
+    skins: normalizeSkins(skins, config),
     ballsOwned: 1,
     ballsLaunched: 0,
     returnedBalls: 0,
@@ -144,7 +166,7 @@ export function createGameController({
     };
     const maxGuideLength = gameState.arena.launcherY - config.topPadding;
     const launchVector = limitVectorLength(rawLaunchVector, maxGuideLength);
-    const canFire = launchVector.y < -18;
+    const canFire = isLaunchAngleAllowed(launchVector, config);
 
     return {
       canFire,
@@ -269,7 +291,7 @@ export function createGameController({
     nextState.round = Math.max(1, Math.floor(restoreNumber(snapshot.round, nextState.round)));
     nextState.score = Math.max(0, Math.floor(restoreNumber(snapshot.score, nextState.score)));
     nextState.bestScore = Math.max(0, Math.floor(restoreNumber(snapshot.bestScore, nextState.bestScore)));
-    nextState.skins = normalizeSkins(snapshot.skins ?? nextState.skins);
+    nextState.skins = normalizeSkins(snapshot.skins ?? nextState.skins, config);
     nextState.ballsOwned = Math.max(1, Math.floor(restoreNumber(snapshot.ballsOwned, nextState.ballsOwned)));
     nextState.ballsLaunched = Math.max(0, Math.floor(restoreNumber(snapshot.ballsLaunched, nextState.ballsLaunched)));
     nextState.returnedBalls = Math.max(0, Math.floor(restoreNumber(snapshot.returnedBalls, nextState.returnedBalls)));
@@ -624,7 +646,7 @@ export function createGameController({
   }
 
   function setSkins(skins) {
-    gameState.skins = normalizeSkins(skins);
+    gameState.skins = normalizeSkins(skins, config);
   }
 
   spawnRound();

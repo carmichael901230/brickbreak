@@ -176,6 +176,14 @@ function renderShop() {
     sample.className = `skin-sample ${shopCategory}`;
     sample.style.background = skin.color;
     sample.style.color = skin.color;
+    sample.style.setProperty("--skin-accent", skin.accent ?? "rgba(255,255,255,0.72)");
+    if (skin.pattern) {
+      sample.dataset.pattern = skin.pattern;
+    }
+    const storeImage = skin.storeImage ?? skin.image;
+    if (storeImage) {
+      sample.style.backgroundImage = `url("./${storeImage}")`;
+    }
     item.append(sample);
 
     const action = document.createElement("span");

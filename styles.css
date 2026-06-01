@@ -405,10 +405,93 @@ canvas {
 .skin-sample {
   width: min(74px, 18vw);
   height: min(74px, 18vw);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  position: relative;
+  overflow: hidden;
 }
 
 .skin-sample.brick {
   border: 2px solid rgba(255, 255, 255, 0.18);
+}
+
+.skin-sample.brick::before,
+.skin-sample.brick::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.skin-sample.brick::after {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.24), transparent 48%, rgba(0, 0, 0, 0.2));
+}
+
+.skin-sample.brick[data-pattern="sunburst"]::before {
+  background:
+    radial-gradient(circle at center, var(--skin-accent) 0 17%, transparent 18%),
+    repeating-conic-gradient(from 0deg, color-mix(in srgb, var(--skin-accent), transparent 28%) 0 14deg, transparent 14deg 45deg);
+}
+
+.skin-sample.brick[data-pattern="candy"]::before {
+  background: repeating-linear-gradient(135deg, transparent 0 13px, color-mix(in srgb, var(--skin-accent), transparent 18%) 13px 25px);
+}
+
+.skin-sample.brick[data-pattern="heart"]::before {
+  background:
+    radial-gradient(circle at 40% 38%, color-mix(in srgb, var(--skin-accent), transparent 22%) 0 13%, transparent 14%),
+    radial-gradient(circle at 60% 38%, color-mix(in srgb, var(--skin-accent), transparent 22%) 0 13%, transparent 14%),
+    linear-gradient(45deg, transparent 38%, color-mix(in srgb, var(--skin-accent), transparent 22%) 39% 61%, transparent 62%);
+  opacity: 0.58;
+}
+
+.skin-sample.brick[data-pattern="prism"]::before {
+  background:
+    linear-gradient(45deg, transparent 45%, var(--skin-accent) 46% 54%, transparent 55%),
+    linear-gradient(-45deg, transparent 45%, color-mix(in srgb, var(--skin-accent), transparent 20%) 46% 54%, transparent 55%),
+    linear-gradient(90deg, transparent 47%, color-mix(in srgb, var(--skin-accent), transparent 34%) 48% 52%, transparent 53%);
+}
+
+.skin-sample.brick[data-pattern="ice"]::before {
+  background:
+    linear-gradient(18deg, transparent 40%, color-mix(in srgb, var(--skin-accent), transparent 20%) 41% 44%, transparent 45%),
+    linear-gradient(112deg, transparent 34%, color-mix(in srgb, var(--skin-accent), transparent 22%) 35% 38%, transparent 39%),
+    linear-gradient(58deg, transparent 58%, color-mix(in srgb, var(--skin-accent), transparent 26%) 59% 62%, transparent 63%);
+}
+
+.skin-sample.brick[data-pattern="circuit"]::before {
+  background:
+    radial-gradient(circle at 78% 28%, var(--skin-accent) 0 5%, transparent 6%),
+    radial-gradient(circle at 68% 54%, var(--skin-accent) 0 5%, transparent 6%),
+    radial-gradient(circle at 84% 78%, var(--skin-accent) 0 5%, transparent 6%),
+    linear-gradient(90deg, transparent 13%, var(--skin-accent) 14% 75%, transparent 76%) 0 27% / 100% 5px no-repeat,
+    linear-gradient(90deg, transparent 20%, var(--skin-accent) 21% 66%, transparent 67%) 0 53% / 100% 5px no-repeat,
+    linear-gradient(90deg, transparent 33%, var(--skin-accent) 34% 82%, transparent 83%) 0 77% / 100% 5px no-repeat;
+  opacity: 0.72;
+}
+
+.skin-sample.brick[data-pattern="slime"]::before {
+  background:
+    radial-gradient(circle at 28% 32%, var(--skin-accent) 0 10%, transparent 11%),
+    radial-gradient(circle at 70% 26%, var(--skin-accent) 0 7%, transparent 8%),
+    radial-gradient(circle at 58% 72%, var(--skin-accent) 0 12%, transparent 13%);
+}
+
+.skin-sample.brick[data-pattern="leaf"]::before {
+  background:
+    linear-gradient(135deg, transparent 45%, color-mix(in srgb, var(--skin-accent), transparent 10%) 46% 52%, transparent 53%),
+    radial-gradient(ellipse at 55% 45%, color-mix(in srgb, var(--skin-accent), transparent 18%) 0 22%, transparent 23%);
+}
+
+.skin-sample.brick[data-pattern="lava"]::before {
+  background:
+    linear-gradient(72deg, transparent 22%, var(--skin-accent) 23% 29%, transparent 30%),
+    linear-gradient(112deg, transparent 61%, color-mix(in srgb, var(--skin-accent), transparent 8%) 62% 69%, transparent 70%);
+}
+
+.skin-sample.brick[data-pattern="marble"]::before {
+  background: repeating-linear-gradient(112deg, transparent 0 16px, color-mix(in srgb, var(--skin-accent), transparent 30%) 17px 20px, transparent 21px 34px);
 }
 
 .skin-sample.ball {

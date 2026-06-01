@@ -52,6 +52,15 @@ function darkenSkinColor(color, lifeRatio) {
   return `rgba(${Math.round(rgb.r * shade)}, ${Math.round(rgb.g * shade)}, ${Math.round(rgb.b * shade)}, 0.92)`;
 }
 
+function rgbaFromHex(color, alpha = 1) {
+  const rgb = parseHexColor(color);
+  if (!rgb) {
+    return color;
+  }
+
+  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
+}
+
 function createImageAsset(src) {
   if (typeof Image === "undefined") {
     return { image: null, loaded: false };
@@ -69,12 +78,31 @@ function createImageAsset(src) {
   return asset;
 }
 
-function findSkinColor(config, type, skinId) {
-  return config.skins?.[type]?.find((skin) => skin.id === skinId)?.color ?? null;
+function createSkinAssetMap(config, providedAssets = {}) {
+  const assets = { ...providedAssets };
+  for (const skin of config.skins?.ball ?? []) {
+    const image = skin.gameImage ?? skin.image;
+    if (image && !assets[image]) {
+      assets[image] = createImageAsset(image);
+    }
+  }
+  return assets;
 }
 
-function selectedBallColor(state, config) {
-  return findSkinColor(config, "ball", state.skins?.selected?.ball) ?? "#eff9ff";
+function findSkin(config, type, skinId) {
+  return config.skins?.[type]?.find((skin) => skin.id === skinId) ?? null;
+}
+
+function findSkinColor(config, type, skinId) {
+  return findSkin(config, type, skinId)?.color ?? null;
+}
+
+function selectedBrickSkin(state, config) {
+  return findSkin(config, "brick", state.skins?.selected?.brick);
+}
+
+function selectedBallSkin(state, config) {
+  return findSkin(config, "ball", state.skins?.selected?.ball);
 }
 
 export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
@@ -83,6 +111,7 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
   const pixelRatio = options.pixelRatio || globalThis.devicePixelRatio || 1;
   const showRoundBanner = options.showRoundBanner !== false;
   const coinAsset = options.coinAsset || createImageAsset("src/assets/pic/dollar.png");
+  const ballSkinAssets = createSkinAssetMap(config, options.ballSkinAssets);
 
   function drawScene(state, resolveEntityPosition) {
     drawBackground();
@@ -229,12 +258,12 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
       const { x, y } = resolveEntityPosition(block);
       const visibleRect = getVisibleBrickRect(state, config, x, y);
       const lifeRatio = Math.max(0, Math.min(1, block.hp / Math.max(1, block.maxHp ?? block.hp)));
-      const brickSkinColor = findSkinColor(config, "brick", state.skins?.selected?.brick);
+      const brickSkin = selectedBrickSkin(state, config);
+      const brickSkinColor = brickSkin?.color;
       const fill = brickSkinColor
         ? darkenSkinColor(brickSkinColor, lifeRatio)
         : `rgba(${mixChannel(74, 200, lifeRatio)}, ${mixChannel(102, 224, lifeRatio)}, ${mixChannel(132, 255, lifeRatio)}, 0.92)`;
-      context.fillStyle = fill;
-      context.fillRect(visibleRect.x, visibleRect.y, visibleRect.size, visibleRect.size);
+      drawBrickSkin(visibleRect, fill, brickSkin, lifeRatio);
 
       if (block.hitFlash > 0) {
         context.fillStyle = alphaColor("#ffffff", block.hitFlash * 1.6);
@@ -251,6 +280,141 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
       context.textBaseline = "middle";
       context.fillText(String(block.hp), visibleRect.x + visibleRect.size / 2, visibleRect.y + visibleRect.size / 2 + 2);
     }
+  }
+
+  function drawBrickSkin(rect, fill, skin, lifeRatio) {
+    const { x, y, size } = rect;
+    const accent = skin?.accent ?? "#ffffff";
+    const pattern = skin?.pattern ?? "plain";
+    const centerX = x + size / 2;
+    const centerY = y + size / 2;
+
+    context.save();
+    context.fillStyle = fill;
+    context.fillRect(x, y, size, size);
+    context.beginPath();
+    context.rect(x, y, size, size);
+    context.clip();
+
+    context.globalAlpha = 0.55 + lifeRatio * 0.28;
+    context.strokeStyle = rgbaFromHex(accent, 0.72);
+    context.fillStyle = rgbaFromHex(accent, 0.5);
+    context.lineWidth = Math.max(2, size * 0.045);
+
+    if (pattern === "sunburst") {
+      for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 4) {
+        context.beginPath();
+        context.moveTo(centerX, centerY);
+        context.lineTo(centerX + Math.cos(angle) * size, centerY + Math.sin(angle) * size);
+        context.stroke();
+      }
+      context.beginPath();
+      context.arc(centerX, centerY, size * 0.22, 0, Math.PI * 2);
+      context.fill();
+    } else if (pattern === "candy") {
+      context.lineWidth = Math.max(8, size * 0.16);
+      for (let offset = -size; offset < size * 2; offset += size * 0.42) {
+        context.beginPath();
+        context.moveTo(x + offset, y + size);
+        context.lineTo(x + offset + size, y);
+        context.stroke();
+      }
+    } else if (pattern === "heart") {
+      context.beginPath();
+      context.moveTo(centerX, centerY + size * 0.2);
+      context.bezierCurveTo(x + size * 0.18, y + size * 0.02, x + size * 0.1, y + size * 0.44, centerX, y + size * 0.68);
+      context.bezierCurveTo(x + size * 0.9, y + size * 0.44, x + size * 0.82, y + size * 0.02, centerX, centerY + size * 0.2);
+      context.fill();
+    } else if (pattern === "prism") {
+      context.beginPath();
+      context.moveTo(x + size * 0.5, y + size * 0.12);
+      context.lineTo(x + size * 0.84, y + size * 0.5);
+      context.lineTo(x + size * 0.5, y + size * 0.88);
+      context.lineTo(x + size * 0.16, y + size * 0.5);
+      context.closePath();
+      context.stroke();
+      context.beginPath();
+      context.moveTo(x + size * 0.5, y + size * 0.12);
+      context.lineTo(x + size * 0.5, y + size * 0.88);
+      context.moveTo(x + size * 0.16, y + size * 0.5);
+      context.lineTo(x + size * 0.84, y + size * 0.5);
+      context.stroke();
+    } else if (pattern === "ice") {
+      context.lineWidth = Math.max(1.5, size * 0.026);
+      context.beginPath();
+      context.moveTo(x + size * 0.18, y + size * 0.22);
+      context.lineTo(x + size * 0.82, y + size * 0.38);
+      context.lineTo(x + size * 0.58, y + size * 0.86);
+      context.moveTo(x + size * 0.28, y + size * 0.78);
+      context.lineTo(x + size * 0.48, y + size * 0.16);
+      context.lineTo(x + size * 0.88, y + size * 0.72);
+      context.stroke();
+    } else if (pattern === "circuit") {
+      context.lineWidth = Math.max(2, size * 0.035);
+      const tracks = [
+        [0.16, 0.28, 0.78, 0.28],
+        [0.22, 0.54, 0.68, 0.54],
+        [0.34, 0.78, 0.84, 0.78]
+      ];
+      for (const [x1, y1, x2, y2] of tracks) {
+        context.beginPath();
+        context.moveTo(x + size * x1, y + size * y1);
+        context.lineTo(x + size * x2, y + size * y2);
+        context.stroke();
+        context.beginPath();
+        context.arc(x + size * x2, y + size * y2, size * 0.045, 0, Math.PI * 2);
+        context.fill();
+      }
+    } else if (pattern === "slime") {
+      context.beginPath();
+      context.arc(x + size * 0.28, y + size * 0.32, size * 0.1, 0, Math.PI * 2);
+      context.arc(x + size * 0.7, y + size * 0.26, size * 0.07, 0, Math.PI * 2);
+      context.arc(x + size * 0.58, y + size * 0.72, size * 0.12, 0, Math.PI * 2);
+      context.fill();
+    } else if (pattern === "leaf") {
+      context.beginPath();
+      context.ellipse(centerX, centerY, size * 0.18, size * 0.34, Math.PI / 4, 0, Math.PI * 2);
+      context.fill();
+      context.beginPath();
+      context.moveTo(x + size * 0.28, y + size * 0.72);
+      context.lineTo(x + size * 0.72, y + size * 0.28);
+      context.stroke();
+    } else if (pattern === "lava") {
+      context.lineWidth = Math.max(4, size * 0.07);
+      context.beginPath();
+      context.moveTo(x + size * 0.22, y);
+      context.lineTo(x + size * 0.38, y + size * 0.34);
+      context.lineTo(x + size * 0.3, y + size * 0.58);
+      context.lineTo(x + size * 0.52, y + size);
+      context.moveTo(x + size * 0.72, y + size * 0.04);
+      context.lineTo(x + size * 0.6, y + size * 0.44);
+      context.lineTo(x + size * 0.82, y + size * 0.78);
+      context.stroke();
+    } else if (pattern === "marble") {
+      context.lineWidth = Math.max(2, size * 0.032);
+      for (let offset = -0.1; offset < 1.2; offset += 0.28) {
+        context.beginPath();
+        context.moveTo(x + size * offset, y + size);
+        context.bezierCurveTo(
+          x + size * (offset + 0.18),
+          y + size * 0.72,
+          x + size * (offset - 0.05),
+          y + size * 0.36,
+          x + size * (offset + 0.22),
+          y
+        );
+        context.stroke();
+      }
+    }
+
+    context.globalAlpha = 1;
+    const shine = context.createLinearGradient(x, y, x + size, y + size);
+    shine.addColorStop(0, "rgba(255,255,255,0.22)");
+    shine.addColorStop(0.5, "rgba(255,255,255,0)");
+    shine.addColorStop(1, "rgba(0,0,0,0.18)");
+    context.fillStyle = shine;
+    context.fillRect(x, y, size, size);
+    context.restore();
   }
 
   function drawPickups(state, resolveEntityPosition) {
@@ -345,12 +509,32 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
 
       context.beginPath();
       context.arc(ball.x, ball.y, config.ballRadius, 0, Math.PI * 2);
-      context.fillStyle = selectedBallColor(state, config);
-      context.shadowBlur = 18;
-      context.shadowColor = "rgba(121, 224, 255, 0.75)";
-      context.fill();
-      context.shadowBlur = 0;
+      drawBallSkin(ball.x, ball.y, config.ballRadius, state, 18);
     }
+  }
+
+  function drawBallSkin(centerX, centerY, radius, state, shadowBlur = 0) {
+    const skin = selectedBallSkin(state, config);
+    const image = skin?.gameImage ?? skin?.image;
+    const asset = image ? ballSkinAssets[image] : null;
+
+    context.save();
+    if (shadowBlur > 0) {
+      context.shadowBlur = shadowBlur;
+      context.shadowColor = "rgba(121, 224, 255, 0.75)";
+    }
+
+    if (asset?.loaded && asset.image) {
+      const diameter = radius * 2;
+      context.drawImage(asset.image, centerX - radius, centerY - radius, diameter, diameter);
+    } else {
+      context.beginPath();
+      context.arc(centerX, centerY, radius, 0, Math.PI * 2);
+      context.fillStyle = skin?.color ?? "#eff9ff";
+      context.fill();
+    }
+
+    context.restore();
   }
 
   function drawParticles(state) {
@@ -368,21 +552,21 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
   function drawLauncher(state) {
     const timeNow = globalThis.performance?.now?.() ?? Date.now();
     const pulse = 0.5 + Math.sin(timeNow * 0.005) * 0.12;
+    const launcherRadius = config.ballRadius;
     context.beginPath();
-    context.arc(state.launcherX, state.arena.launcherY, 13 + pulse * 2, 0, Math.PI * 2);
+    context.arc(state.launcherX, state.arena.launcherY, launcherRadius + 3 + pulse * 2, 0, Math.PI * 2);
     context.fillStyle = "rgba(255, 179, 71, 0.18)";
     context.fill();
     context.beginPath();
-    context.arc(state.launcherX, state.arena.launcherY, 10, 0, Math.PI * 2);
-    context.fillStyle = selectedBallColor(state, config);
-    context.fill();
+    context.arc(state.launcherX, state.arena.launcherY, launcherRadius, 0, Math.PI * 2);
+    drawBallSkin(state.launcherX, state.arena.launcherY, launcherRadius, state);
 
     // Keep the ball count anchored to the launcher so the player can read volley size at a glance.
     context.fillStyle = "#d8f1ff";
     context.font = "700 28px 'Segoe UI'";
     context.textAlign = "left";
     context.textBaseline = "middle";
-    context.fillText(`x${state.ballsOwned}`, state.launcherX + 28, state.arena.launcherY + 1);
+    context.fillText(`x${state.ballsOwned}`, state.launcherX + launcherRadius + 18, state.arena.launcherY + 1);
   }
 
   function drawBanner(state) {
