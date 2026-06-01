@@ -260,6 +260,25 @@ test("dragging downward hides the guide and cancels the shot", () => {
   assert.equal(state.launchDirection, null);
 });
 
+test("aiming below the minimum launch angle hides the guide and cancels the shot", () => {
+  const game = createGameController({
+    boardGenerator: createRoundSequence([
+      { blocks: [], pickups: [] },
+      { blocks: [], pickups: [] }
+    ]),
+    audioBus: createSilentAudioBus()
+  });
+
+  game.startAim({ x: 360, y: 800 });
+  game.updateAim({ x: 260, y: 810 });
+  assert.equal(game.getState().aimPoint, null);
+
+  game.releaseAim({ x: 260, y: 810 });
+  const state = game.getState();
+  assert.equal(state.state, "aiming");
+  assert.equal(state.launchDirection, null);
+});
+
 test("aim guide length is capped by the space above the launcher", () => {
   const game = createGameController({
     boardGenerator: createRoundSequence([

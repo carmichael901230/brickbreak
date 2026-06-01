@@ -67,3 +67,22 @@ test("game state snapshot can be exported and restored", () => {
   assert.equal(restored.getState().state, game.getState().state);
   assert.equal(restored.getState().round, game.getState().round);
 });
+
+test("low launch angles hide the guide and do not fire", () => {
+  const game = createGameController({
+    boardGenerator: createBoardGenerator([
+      { blocks: [], pickups: [] },
+      { blocks: [], pickups: [] }
+    ]),
+    audioBus: createAudioBus()
+  });
+
+  game.startAim({ x: 360, y: 800 });
+  game.updateAim({ x: 260, y: 810 });
+  assert.equal(game.getState().aimPoint, null);
+
+  game.releaseAim({ x: 260, y: 810 });
+  const state = game.getState();
+  assert.equal(state.state, "aiming");
+  assert.equal(state.launchDirection, null);
+});
