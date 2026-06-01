@@ -553,6 +553,7 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
     const timeNow = globalThis.performance?.now?.() ?? Date.now();
     const pulse = 0.5 + Math.sin(timeNow * 0.005) * 0.12;
     const launcherRadius = config.ballRadius;
+    const queuedBalls = Math.max(0, state.ballsOwned - state.ballsLaunched);
     context.beginPath();
     context.arc(state.launcherX, state.arena.launcherY, launcherRadius + 3 + pulse * 2, 0, Math.PI * 2);
     context.fillStyle = "rgba(255, 179, 71, 0.18)";
@@ -561,12 +562,12 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
     context.arc(state.launcherX, state.arena.launcherY, launcherRadius, 0, Math.PI * 2);
     drawBallSkin(state.launcherX, state.arena.launcherY, launcherRadius, state);
 
-    // Keep the ball count anchored to the launcher so the player can read volley size at a glance.
+    // Count down queued balls during launch so the volley size reads like remaining ammo.
     context.fillStyle = "#d8f1ff";
     context.font = "700 28px 'Segoe UI'";
     context.textAlign = "left";
     context.textBaseline = "middle";
-    context.fillText(`x${state.ballsOwned}`, state.launcherX + launcherRadius + 18, state.arena.launcherY + 1);
+    context.fillText(`x${queuedBalls}`, state.launcherX + launcherRadius + 18, state.arena.launcherY + 1);
   }
 
   function drawBanner(state) {

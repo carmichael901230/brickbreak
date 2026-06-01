@@ -331,7 +331,7 @@ test("destroyed bricks are removed before the volley ends", () => {
   assert.equal(state.returnedBalls, 0);
 });
 
-test("speed up becomes available after the configured delay and doubles velocity", () => {
+test("speed up becomes available again after its cooldown", () => {
   const customConfig = {
     ...GAME_CONFIG,
     speedUpDelay: 0.1,
@@ -361,6 +361,68 @@ test("speed up becomes available after the configured delay and doubles velocity
   assert.equal(game.activateSpeedUp(), true);
   assert.equal(game.getState().speedUpUsed, true);
   assert.equal(game.getState().balls[0].vx, beforeSpeedUp * customConfig.speedUpMultiplier);
+  assert.equal(game.getState().speedUpAvailable, false);
+  assert.equal(game.activateSpeedUp(), false);
+
+  for (let index = 0; index < 7; index += 1) {
+    game.update(0.016);
+  }
+
+  assert.equal(game.getState().speedUpAvailable, true);
+
+  const beforeSecondSpeedUp = game.getState().balls[0].vx;
+  assert.equal(game.activateSpeedUp(), true);
+  assert.equal(game.getState().balls[0].vx, beforeSecondSpeedUp * customConfig.speedUpMultiplier);
+  assert.equal(game.getState().speedMultiplier, customConfig.speedUpMultiplier * customConfig.speedUpMultiplier);
+});
+
+test("speed up increases queued ball launch frequency", () => {
+  const customConfig = {
+    ...GAME_CONFIG,
+    speedUpDelay: 0,
+    launchInterval: 0.12,
+    ballSpeed: 100,
+    settleThreshold: 5000,
+    height: 4200
+  };
+  const game = createGameController({
+    config: customConfig,
+    boardGenerator: createRoundSequence([
+      { blocks: [], pickups: [] },
+      { blocks: [], pickups: [] }
+    ]),
+    audioBus: createSilentAudioBus()
+  });
+
+  const state = game.getState();
+  const baseBall = state.balls[0];
+  state.ballsOwned = 3;
+  state.balls = Array.from({ length: state.ballsOwned }, () => ({
+    ...baseBall,
+    active: false,
+    returned: false,
+    x: state.launcherX,
+    y: state.arena.launcherY,
+    vx: 0,
+    vy: 0
+  }));
+
+  game.startAim({ x: 360, y: 500 });
+  game.updateAim({ x: 200, y: 3900 });
+  game.releaseAim({ x: 200, y: 3900 });
+  game.update(0.016);
+
+  assert.equal(game.getState().ballsLaunched, 1);
+  assert.equal(game.getState().speedUpAvailable, true);
+  assert.equal(game.activateSpeedUp(), true);
+
+  for (let index = 0; index < 3; index += 1) {
+    game.update(0.016);
+  }
+
+  assert.equal(game.getState().ballsLaunched, 1);
+  game.update(0.016);
+  assert.equal(game.getState().ballsLaunched, 2);
 });
 
 test("pickups disappear when they reach the dotted bottom line", () => {

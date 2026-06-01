@@ -132,6 +132,7 @@ export function createInitialGameState(config = GAME_CONFIG, coins = 0, skins = 
     launchCooldown: 0,
     speedMultiplier: 1,
     volleyElapsed: 0,
+    nextSpeedUpAt: config.speedUpDelay,
     speedUpAvailable: false,
     speedUpUsed: false,
     state: "aiming",
@@ -191,6 +192,7 @@ export function createGameController({
     gameState.firstReturnX = null;
     gameState.speedMultiplier = 1;
     gameState.volleyElapsed = 0;
+    gameState.nextSpeedUpAt = config.speedUpDelay;
     gameState.speedUpAvailable = false;
     gameState.speedUpUsed = false;
   }
@@ -264,6 +266,7 @@ export function createGameController({
       launchCooldown: gameState.launchCooldown,
       speedMultiplier: gameState.speedMultiplier,
       volleyElapsed: gameState.volleyElapsed,
+      nextSpeedUpAt: gameState.nextSpeedUpAt,
       speedUpAvailable: gameState.speedUpAvailable,
       speedUpUsed: gameState.speedUpUsed,
       state: gameState.state,
@@ -304,6 +307,7 @@ export function createGameController({
     nextState.launchCooldown = restoreNumber(snapshot.launchCooldown, nextState.launchCooldown);
     nextState.speedMultiplier = restoreNumber(snapshot.speedMultiplier, nextState.speedMultiplier);
     nextState.volleyElapsed = restoreNumber(snapshot.volleyElapsed, nextState.volleyElapsed);
+    nextState.nextSpeedUpAt = restoreNumber(snapshot.nextSpeedUpAt, nextState.nextSpeedUpAt);
     nextState.speedUpAvailable = restoreBoolean(snapshot.speedUpAvailable, nextState.speedUpAvailable);
     nextState.speedUpUsed = restoreBoolean(snapshot.speedUpUsed, nextState.speedUpUsed);
     nextState.state = snapshot.state;
@@ -381,6 +385,7 @@ export function createGameController({
     gameState.state = "launching";
     gameState.launchCooldown = 0;
     gameState.volleyElapsed = 0;
+    gameState.nextSpeedUpAt = config.speedUpDelay;
     gameState.speedUpAvailable = false;
     gameState.speedUpUsed = false;
   }
@@ -580,17 +585,13 @@ export function createGameController({
 
     if (gameState.state === "launching" || gameState.state === "resolving") {
       gameState.volleyElapsed += cappedDelta;
-      if (
-        !gameState.speedUpAvailable &&
-        !gameState.speedUpUsed &&
-        gameState.volleyElapsed >= config.speedUpDelay
-      ) {
+      if (!gameState.speedUpAvailable && gameState.volleyElapsed >= gameState.nextSpeedUpAt) {
         gameState.speedUpAvailable = true;
       }
     }
 
     if (gameState.state === "launching") {
-      gameState.launchCooldown -= cappedDelta;
+      gameState.launchCooldown -= cappedDelta * gameState.speedMultiplier;
       if (gameState.launchCooldown <= 0 && gameState.ballsLaunched < gameState.ballsOwned) {
         emitBall();
         gameState.launchCooldown = config.launchInterval;
@@ -614,13 +615,14 @@ export function createGameController({
   }
 
   function activateSpeedUp() {
-    if (!gameState.speedUpAvailable || gameState.speedUpUsed) {
+    if (!gameState.speedUpAvailable) {
       return false;
     }
 
-    // Existing balls need an immediate velocity bump, while later emissions read the new multiplier.
-    gameState.speedMultiplier = config.speedUpMultiplier;
+    // Existing balls need an immediate velocity bump, while later emissions read the accumulated multiplier.
+    gameState.speedMultiplier *= config.speedUpMultiplier;
     gameState.speedUpAvailable = false;
+    gameState.nextSpeedUpAt = gameState.volleyElapsed + config.speedUpDelay;
     gameState.speedUpUsed = true;
 
     for (const ball of gameState.balls) {
