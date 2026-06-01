@@ -192,6 +192,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   const tutorialAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/tap.png");
   const settingsIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/settings.png");
   const coinIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/dollar.png");
+  const speedIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/fast-forward.png");
   const ballSkinAssets = Object.fromEntries(
     GAME_CONFIG.skins.ball
       .map((skin) => skin.gameImage ?? skin.image)
@@ -715,13 +716,28 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     roundedRect(context, button.x, button.y, button.width, button.height, 24);
     context.fillStyle = primary ? "#f2b400" : button.id === "shop" ? "#2f80ed" : "rgba(255,255,255,0.08)";
     context.fill();
-    context.strokeStyle = primary ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.12)";
-    context.lineWidth = 1;
-    context.stroke();
+    if (button.id !== "speed") {
+      context.strokeStyle = primary ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.12)";
+      context.lineWidth = 1;
+      context.stroke();
+    }
     context.fillStyle = primary ? "#1d1d1d" : "#fbfbfb";
     context.font = "700 20px sans-serif";
-    context.textAlign = "center";
     context.textBaseline = "middle";
+
+    if (button.id === "speed" && speedIconAsset.loaded && speedIconAsset.image) {
+      const iconSize = 20;
+      const gap = 6;
+      const textWidth = context.measureText(label).width;
+      const contentX = button.x + (button.width - iconSize - gap - textWidth) / 2;
+      const centerY = button.y + button.height / 2;
+      context.drawImage(speedIconAsset.image, contentX, centerY - iconSize / 2, iconSize, iconSize);
+      context.textAlign = "left";
+      context.fillText(label, contentX + iconSize + gap, centerY + 1);
+      return;
+    }
+
+    context.textAlign = "center";
     context.fillText(label, button.x + button.width / 2, button.y + button.height / 2 + 1);
   }
 

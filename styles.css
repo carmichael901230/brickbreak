@@ -268,6 +268,16 @@ input {
   right: 10px;
   z-index: 2;
   padding: 11px 16px;
+  border: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.speed-button img {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
 }
 
 .speed-button.is-hidden,
