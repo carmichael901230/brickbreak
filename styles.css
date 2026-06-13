@@ -334,6 +334,16 @@ canvas {
   text-align: center;
 }
 
+.game-over-card {
+  gap: 14px;
+}
+
+.overlay-action-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 #settingsOverlay .overlay-card {
   gap: 18px;
   padding: 28px 24px;

@@ -634,8 +634,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     if (overlay === "gameover") {
       buttons.push(
-        { id: "restart", x: rect.x + 36, y: rect.y + rect.height * 0.56, width: rect.width - 72, height: 52 },
-        { id: "menu", x: rect.x + 36, y: rect.y + rect.height * 0.68, width: rect.width - 72, height: 52 }
+        { id: "restart", x: rect.x + 36, y: rect.y + rect.height * 0.54, width: rect.width - 72, height: 52 },
+        { id: "menu", x: rect.x + 36, y: rect.y + rect.height * 0.66, width: rect.width - 72, height: 52 }
       );
     }
 
@@ -1208,7 +1208,14 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         continue;
       }
 
-      drawButton(context, button, labels[button.id], button.id === "resume" || button.id === "restart" || button.id === "settings-done");
+      drawButton(
+        context,
+        button,
+        labels[button.id],
+        button.id === "resume" ||
+          button.id === "restart" ||
+          button.id === "settings-done"
+      );
     }
   }
 

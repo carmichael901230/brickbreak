@@ -104,11 +104,13 @@
     </div>
 
     <div id="gameOverOverlay" class="overlay is-hidden" aria-hidden="true">
-      <div class="overlay-card">
+      <div class="overlay-card game-over-card">
         <h2>Run Over</h2>
         <p id="gameOverSummary" class="overlay-copy">You made it to round 1.</p>
-        <button id="restartRunButton" class="primary-button" type="button">Restart</button>
-        <button id="gameOverMenuButton" class="secondary-button" type="button">Main Menu</button>
+        <div class="overlay-action-stack">
+          <button id="restartRunButton" class="primary-button" type="button">Restart</button>
+          <button id="gameOverMenuButton" class="secondary-button" type="button">Main Menu</button>
+        </div>
       </div>
     </div>
 

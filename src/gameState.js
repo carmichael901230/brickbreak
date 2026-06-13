@@ -46,6 +46,11 @@ function getEntityPosition(arena, config, entity) {
   };
 }
 
+function isEntityAtFailLine(arena, config, entity) {
+  const position = getEntityPosition(arena, config, entity);
+  return position.y + arena.blockSize >= arena.failLineY;
+}
+
 function createBall(launcherX, launcherY) {
   return {
     x: launcherX,
@@ -226,10 +231,7 @@ export function createGameController({
     gameState.bannerTimer = config.effects.roundBannerTime;
     gameState.score = Math.max(gameState.score, gameState.round - 1);
 
-    if (gameState.blocks.some((block) => {
-      const position = getEntityPosition(gameState.arena, config, block);
-      return position.y + gameState.arena.blockSize >= gameState.arena.failLineY;
-    })) {
+    if (gameState.blocks.some((block) => isEntityAtFailLine(gameState.arena, config, block))) {
       gameState.state = "gameover";
       gameState.gameOver = true;
       audioBus.emit("gameOver", { score: gameState.score });

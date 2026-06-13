@@ -429,7 +429,14 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         restart: t("restart")
       };
 
-      drawButton(context, button, labels[button.id], button.id === "resume" || button.id === "restart" || button.id === "settings-done");
+      drawButton(
+        context,
+        button,
+        labels[button.id],
+        button.id === "resume" ||
+          button.id === "restart" ||
+          button.id === "settings-done"
+      );
     }
   }
 
