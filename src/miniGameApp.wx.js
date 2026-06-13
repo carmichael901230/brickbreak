@@ -30,6 +30,8 @@ const texts = {
   soundOff: "关",
   done: "完成",
   reachedRound: (round) => `你打到了第 ${round} 回合。`,
+  shareContinue: "分享后继续",
+  shareContinueHint: "分享即可继续一次。",
   speed: "加速"
 };
 
@@ -155,19 +157,21 @@ function createSoundPlayer(wxApi, src, { poolSize = 1, volume = 0.4, cooldownMs 
   };
 }
 
-function enableWeChatShare(wxApi) {
-  const sharePayload = {
+function createSharePayload(source = "menu-share") {
+  return {
     title: "弹球突围 - 一起来挑战更高回合",
     imageUrl: "src/assets/pic/icon.png",
-    query: "from=menu-share"
+    query: `from=${source}`
   };
+}
 
+function enableWeChatShare(wxApi) {
   wxApi.showShareMenu?.({
     menus: ["shareAppMessage", "shareTimeline"]
   });
 
-  wxApi.onShareAppMessage?.(() => sharePayload);
-  wxApi.onShareTimeline?.(() => sharePayload);
+  wxApi.onShareAppMessage?.(() => createSharePayload());
+  wxApi.onShareTimeline?.(() => createSharePayload());
 }
 
 const GAME_PROGRESS_VERSION = 1;
@@ -251,6 +255,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let lastSavedProgressJson = null;
   let lastSavedProgressAt = 0;
   let hasStartedRun = false;
+  let continueUsedThisRun = false;
   let lastSavedCoins = storage.loadCoins();
   let lastSavedSkinsJson = JSON.stringify(storage.loadSkins());
   let shopCategory = "brick";
@@ -340,6 +345,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       version: GAME_PROGRESS_VERSION,
       savedAt: Date.now(),
       bestScore,
+      continueUsedThisRun,
       snapshot
     };
   }
@@ -384,6 +390,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     screen = "game";
     overlay = "pause";
     hasStartedRun = true;
+    continueUsedThisRun = progress.continueUsedThisRun === true;
     bestScore = Math.max(bestScore, Number(progress.bestScore) || 0);
     tutorialIdleTime = 0;
     tutorialDismissed = true;
@@ -396,6 +403,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     clearSavedProgress();
     game.restart();
     hasStartedRun = true;
+    continueUsedThisRun = false;
     screen = "game";
     overlay = null;
     tutorialIdleTime = 0;
@@ -429,6 +437,31 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     screen = "menu";
     pointerActive = false;
     tutorialIdleTime = 0;
+  }
+
+  function shareToContinue() {
+    if (continueUsedThisRun || game.getState().state !== "gameover") {
+      return;
+    }
+
+    try {
+      wxApi.shareAppMessage?.(createSharePayload("loss-continue"));
+    } catch {
+      // Sharing is best-effort; continue is granted even if the share panel cannot open.
+    }
+
+    continueUsedThisRun = true;
+    if (!game.continueFromGameOver()) {
+      return;
+    }
+
+    screen = "game";
+    overlay = null;
+    hasStartedRun = true;
+    pointerActive = false;
+    tutorialIdleTime = 0;
+    tutorialDismissed = true;
+    persistProgress(true);
   }
 
   function openShop() {
@@ -633,10 +666,18 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
 
     if (overlay === "gameover") {
-      buttons.push(
-        { id: "restart", x: rect.x + 36, y: rect.y + rect.height * 0.54, width: rect.width - 72, height: 52 },
-        { id: "menu", x: rect.x + 36, y: rect.y + rect.height * 0.66, width: rect.width - 72, height: 52 }
-      );
+      if (!continueUsedThisRun) {
+        buttons.push(
+          { id: "share-continue", x: rect.x + 36, y: rect.y + rect.height * 0.46, width: rect.width - 72, height: 52 },
+          { id: "restart", x: rect.x + 36, y: rect.y + rect.height * 0.58, width: rect.width - 72, height: 52 },
+          { id: "menu", x: rect.x + 36, y: rect.y + rect.height * 0.70, width: rect.width - 72, height: 52 }
+        );
+      } else {
+        buttons.push(
+          { id: "restart", x: rect.x + 36, y: rect.y + rect.height * 0.54, width: rect.width - 72, height: 52 },
+          { id: "menu", x: rect.x + 36, y: rect.y + rect.height * 0.66, width: rect.width - 72, height: 52 }
+        );
+      }
     }
 
     return buttons;
@@ -669,6 +710,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         break;
       case "restart":
         startRun();
+        break;
+      case "share-continue":
+        shareToContinue();
         break;
       case "pause":
         if (overlay === null && game.getState().state !== "gameover") {
@@ -1188,6 +1232,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       context.fillStyle = "rgba(255,255,255,0.72)";
       context.font = "20px sans-serif";
       context.fillText(texts.reachedRound(state.round), screenWidth / 2, panel.y + 108);
+      if (!continueUsedThisRun) {
+        context.font = "18px sans-serif";
+        context.fillText(texts.shareContinueHint, screenWidth / 2, panel.y + 136);
+      }
     }
 
     for (const button of currentButtons()) {
@@ -1200,6 +1248,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         settings: texts.settings,
         menu: texts.mainMenu,
         "settings-done": texts.done,
+        "share-continue": texts.shareContinue,
         restart: texts.restart
       };
 
@@ -1213,6 +1262,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         button,
         labels[button.id],
         button.id === "resume" ||
+          button.id === "share-continue" ||
           button.id === "restart" ||
           button.id === "settings-done"
       );

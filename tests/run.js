@@ -215,6 +215,54 @@ test("coins are collected on contact and emit a coin event", () => {
   assert.equal(audioBus.events.some((event) => event.type === "coin"), true);
 });
 
+test("continueFromGameOver returns the game to aiming and removes fail-line blocks", () => {
+  const game = createGameController({
+    boardGenerator: createRoundSequence([
+      { blocks: [], pickups: [] },
+      { blocks: [], pickups: [] }
+    ]),
+    audioBus: createSilentAudioBus()
+  });
+
+  const state = game.getState();
+  state.round = 6;
+  state.score = 5;
+  state.ballsOwned = 3;
+  state.state = "gameover";
+  state.gameOver = true;
+  state.blocks = [
+    { id: "safe", row: 2, column: 0, hp: 2 },
+    { id: "failed", row: 7, column: 1, hp: 4 }
+  ];
+
+  assert.equal(game.continueFromGameOver(), true);
+
+  const continued = game.getState();
+  assert.equal(continued.state, "aiming");
+  assert.equal(continued.gameOver, false);
+  assert.deepEqual(continued.blocks.map((block) => block.id), ["safe"]);
+  assert.equal(continued.round, 6);
+  assert.equal(continued.score, 5);
+  assert.equal(continued.balls.length, 3);
+  assert.equal(continued.ballsLaunched, 0);
+  assert.equal(continued.returnedBalls, 0);
+});
+
+test("continueFromGameOver is ignored before gameover", () => {
+  const game = createGameController({
+    boardGenerator: createRoundSequence([
+      { blocks: [], pickups: [] },
+      { blocks: [], pickups: [] }
+    ]),
+    audioBus: createSilentAudioBus()
+  });
+
+  const before = game.exportSnapshot();
+
+  assert.equal(game.continueFromGameOver(), false);
+  assert.deepEqual(game.exportSnapshot(), before);
+});
+
 test("releaseAim fires opposite to the drag direction", () => {
   const customConfig = {
     ...GAME_CONFIG,

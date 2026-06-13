@@ -246,6 +246,22 @@ export function createGameController({
     spawnRound();
   }
 
+  function continueFromGameOver() {
+    if (gameState.state !== "gameover") {
+      return false;
+    }
+
+    gameState.blocks = gameState.blocks.filter((block) => !isEntityAtFailLine(gameState.arena, config, block));
+    gameState.state = "aiming";
+    gameState.gameOver = false;
+    gameState.aiming = false;
+    gameState.aimDragOrigin = null;
+    gameState.aimPoint = null;
+    gameState.launchDirection = null;
+    resetRoundEntities();
+    return true;
+  }
+
   function exportSnapshot() {
     if (gameState.state === "gameover") {
       return null;
@@ -657,6 +673,7 @@ export function createGameController({
 
   return {
     activateSpeedUp,
+    continueFromGameOver,
     exportSnapshot,
     importSnapshot,
     restart,
