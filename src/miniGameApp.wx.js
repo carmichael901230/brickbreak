@@ -29,9 +29,11 @@ const texts = {
   soundOn: "开",
   soundOff: "关",
   done: "完成",
-  reachedRound: (round) => `你打到了第 ${round} 回合。`,
-  shareContinue: "分享后继续",
-  shareContinueHint: "分享即可继续一次。",
+  reachedRound: (round) => `你打到了第 ${round} 回合`,
+  shareContinue: "分享复活",
+  shareContinueHintOne: "球球还没放弃！",
+  shareContinueHintTwo: "分享到微信群即可获得一次复活机会",
+  shareContinueHintThree: "继续冲击更高分",
   speed: "加速"
 };
 
@@ -566,6 +568,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   function currentButtons() {
     const rect = canvasRect();
     const layout = shopLayout();
+    const gameOverPanel = {
+      x: rect.x + 24,
+      y: rect.y + rect.height * 0.24,
+      width: rect.width - 48,
+      height: rect.height * 0.54
+    };
 
     if (screen === "menu") {
       const buttons = overlay === "shop" || overlay === "settings"
@@ -666,17 +674,30 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
 
     if (overlay === "gameover") {
+      buttons.push({
+        id: "gameover-close",
+        x: gameOverPanel.x + gameOverPanel.width - 58,
+        y: gameOverPanel.y + 16,
+        width: 42,
+        height: 42
+      });
+
       if (!continueUsedThisRun) {
-        buttons.push(
-          { id: "share-continue", x: rect.x + 36, y: rect.y + rect.height * 0.46, width: rect.width - 72, height: 52 },
-          { id: "restart", x: rect.x + 36, y: rect.y + rect.height * 0.58, width: rect.width - 72, height: 52 },
-          { id: "menu", x: rect.x + 36, y: rect.y + rect.height * 0.70, width: rect.width - 72, height: 52 }
-        );
+        buttons.push({
+          id: "share-continue",
+          x: gameOverPanel.x + 24,
+          y: gameOverPanel.y + gameOverPanel.height - 76,
+          width: gameOverPanel.width - 48,
+          height: 52
+        });
       } else {
-        buttons.push(
-          { id: "restart", x: rect.x + 36, y: rect.y + rect.height * 0.54, width: rect.width - 72, height: 52 },
-          { id: "menu", x: rect.x + 36, y: rect.y + rect.height * 0.66, width: rect.width - 72, height: 52 }
-        );
+        buttons.push({
+          id: "menu",
+          x: gameOverPanel.x + 24,
+          y: gameOverPanel.y + gameOverPanel.height - 76,
+          width: gameOverPanel.width - 48,
+          height: 52
+        });
       }
     }
 
@@ -713,6 +734,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         break;
       case "share-continue":
         shareToContinue();
+        break;
+      case "gameover-close":
+        goToMenu();
         break;
       case "pause":
         if (overlay === null && game.getState().state !== "gameover") {
@@ -758,10 +782,20 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
 
     roundedRect(context, button.x, button.y, button.width, button.height, 24);
-    context.fillStyle = primary ? "#f2b400" : button.id === "shop" ? "#2f80ed" : "rgba(255,255,255,0.08)";
+    context.fillStyle = button.id === "share-continue"
+      ? "#22c55e"
+      : primary
+        ? "#f2b400"
+        : button.id === "shop"
+          ? "#2f80ed"
+          : "rgba(255,255,255,0.08)";
     context.fill();
     if (button.id !== "speed") {
-      context.strokeStyle = primary ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.12)";
+      context.strokeStyle = button.id === "share-continue"
+        ? "rgba(255,255,255,0.18)"
+        : primary
+          ? "rgba(0,0,0,0.08)"
+          : "rgba(255,255,255,0.12)";
       context.lineWidth = 1;
       context.stroke();
     }
@@ -1122,6 +1156,25 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     context.restore();
   }
 
+  function drawCloseButton(context, button) {
+    if (!button) {
+      return;
+    }
+
+    const inset = 7;
+    context.save();
+    context.strokeStyle = "#fbfbfb";
+    context.lineWidth = 5;
+    context.lineCap = "round";
+    context.beginPath();
+    context.moveTo(button.x + inset, button.y + inset);
+    context.lineTo(button.x + button.width - inset, button.y + button.height - inset);
+    context.moveTo(button.x + button.width - inset, button.y + inset);
+    context.lineTo(button.x + inset, button.y + button.height - inset);
+    context.stroke();
+    context.restore();
+  }
+
   function drawMiniOverlay(context, state) {
     const rect = canvasRect();
 
@@ -1219,6 +1272,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       panel.y + 48
     );
 
+    if (overlay === "gameover") {
+      drawCloseButton(context, currentButtons().find((button) => button.id === "gameover-close"));
+    }
+
     if (overlay === "settings") {
       const toggleButton = currentButtons().find((button) => button.id === "toggle-sound");
       context.fillStyle = "rgba(255,255,255,0.72)";
@@ -1229,17 +1286,23 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
 
     if (overlay === "gameover") {
-      context.fillStyle = "rgba(255,255,255,0.72)";
-      context.font = "20px sans-serif";
-      context.fillText(texts.reachedRound(state.round), screenWidth / 2, panel.y + 108);
       if (!continueUsedThisRun) {
-        context.font = "18px sans-serif";
-        context.fillText(texts.shareContinueHint, screenWidth / 2, panel.y + 136);
+        context.fillStyle = "#fbfbfb";
+        context.font = "800 20px sans-serif";
+        context.fillText(texts.shareContinueHintOne, screenWidth / 2, panel.y + 112);
+        context.fillStyle = "rgba(255,255,255,0.82)";
+        context.font = "20px sans-serif";
+        context.fillText(texts.shareContinueHintTwo, screenWidth / 2, panel.y + 154);
+        context.fillText(texts.shareContinueHintThree, screenWidth / 2, panel.y + 184);
+      } else {
+        context.fillStyle = "rgba(255,255,255,0.82)";
+        context.font = "22px sans-serif";
+        context.fillText(texts.reachedRound(state.round), screenWidth / 2, panel.y + 132);
       }
     }
 
     for (const button of currentButtons()) {
-      if (["play", "pause", "speed", "menu-settings"].includes(button.id)) {
+      if (["play", "pause", "speed", "menu-settings", "gameover-close"].includes(button.id)) {
         continue;
       }
 
@@ -1262,6 +1325,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         button,
         labels[button.id],
         button.id === "resume" ||
+          (overlay === "gameover" && button.id === "menu") ||
           button.id === "share-continue" ||
           button.id === "restart" ||
           button.id === "settings-done"
