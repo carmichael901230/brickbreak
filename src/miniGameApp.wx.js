@@ -7,9 +7,12 @@ import { createWeChatStorageAdapter } from "./storage.js";
 
 const texts = {
   title: "弹球突围",
-  menuLineOne: "调整角度，击碎砖块。",
-  menuLineTwo: "再坚持一回合。",
+  bestRecord: "最高纪录",
+  unfinishedProgress: "当前进度",
+  levelValue: (level) => `第 ${level} 关`,
+  continueChallenge: "继续游戏",
   play: "开始游戏",
+  startNew: "开始新游戏",
   shop: "商店",
   brickSkins: "砖块",
   ballSkins: "小球",
@@ -22,7 +25,7 @@ const texts = {
   paused: "已暂停",
   settings: "设置",
   runOver: "本局结束",
-  restart: "重新开始",
+  restart: "再来一局",
   mainMenu: "主菜单",
   resume: "继续游戏",
   soundLabel: "音效",
@@ -32,8 +35,11 @@ const texts = {
   reachedRound: (round) => `你打到了第 ${round} 回合`,
   shareContinue: "分享复活",
   shareContinueHintOne: "球球还没放弃！",
-  shareContinueHintTwo: "分享到微信群即可获得一次复活机会",
-  shareContinueHintThree: "继续冲击更高分",
+  shareContinueHintTwo: "分享到微信群立即复活 +1",
+  shareContinueHintThree: "继续冲击更高分!",
+  unfinishedTitle: "还有未完成的游戏",
+  unfinishedLineOne: "继续上一局，还是开始新游戏？",
+  unfinishedLineTwo: "开始新游戏会放弃当前进度。",
   speed: "加速"
 };
 
@@ -199,6 +205,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   const settingsIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/settings.png");
   const coinIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/dollar.png");
   const speedIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/fast-forward.png");
+  const trophyIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/trophy.png");
   const ballSkinAssets = Object.fromEntries(
     GAME_CONFIG.skins.ball
       .map((skin) => skin.gameImage ?? skin.image)
@@ -377,9 +384,49 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     lastSavedProgressAt = now;
   }
 
-  function tryResumeSavedProgress() {
+  function loadSavedProgress() {
     const progress = storage.loadGameProgress();
     if (!progress || progress.version !== GAME_PROGRESS_VERSION || !progress.snapshot) {
+      return null;
+    }
+
+    return progress;
+  }
+
+  function hasActiveUnfinishedRun() {
+    return hasStartedRun && game.getState().state !== "gameover";
+  }
+
+  function hasUnfinishedRun() {
+    if (hasActiveUnfinishedRun()) {
+      return true;
+    }
+
+    return loadSavedProgress() !== null;
+  }
+
+  function currentRecordLevel() {
+    return Math.max(1, Math.floor(bestScore) + 1);
+  }
+
+  function hasBestRecord() {
+    return bestScore > 0;
+  }
+
+  function unfinishedProgressLevel() {
+    if (hasActiveUnfinishedRun()) {
+      return Math.max(1, Math.floor(game.getState().round));
+    }
+
+    const progress = loadSavedProgress();
+    return progress?.snapshot
+      ? Math.max(1, Math.floor(Number(progress.snapshot.round) || 1))
+      : null;
+  }
+
+  function resumeSavedProgress() {
+    const progress = loadSavedProgress();
+    if (!progress) {
       return false;
     }
 
@@ -401,6 +448,23 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     return true;
   }
 
+  function continueFromMenu() {
+    if (hasActiveUnfinishedRun()) {
+      screen = "game";
+      overlay = null;
+      pointerActive = false;
+      tutorialIdleTime = 0;
+      persistProgress(true);
+      return;
+    }
+
+    if (resumeSavedProgress()) {
+      overlay = null;
+      pointerActive = false;
+      persistProgress(true);
+    }
+  }
+
   function startRun() {
     clearSavedProgress();
     game.restart();
@@ -414,17 +478,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   function playFromMenu() {
-    if (hasStartedRun && game.getState().state !== "gameover") {
-      screen = "game";
-      overlay = null;
-      pointerActive = false;
-      tutorialIdleTime = 0;
-      persistProgress(true);
-      return;
-    }
-
-    if (tryResumeSavedProgress()) {
-      overlay = null;
+    if (hasUnfinishedRun()) {
+      overlay = "confirm-new-run";
       return;
     }
 
@@ -568,6 +623,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   function currentButtons() {
     const rect = canvasRect();
     const layout = shopLayout();
+    const confirmNewRunPanel = {
+      x: rect.x + 24,
+      y: rect.y + rect.height * 0.16,
+      width: rect.width - 48,
+      height: rect.height * 0.68
+    };
     const gameOverPanel = {
       x: rect.x + 24,
       y: rect.y + rect.height * 0.24,
@@ -576,7 +637,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     };
 
     if (screen === "menu") {
-      const buttons = overlay === "shop" || overlay === "settings"
+      const buttons = overlay === "shop" || overlay === "settings" || overlay === "confirm-new-run"
         ? []
         : [
             {
@@ -585,22 +646,66 @@ export function bootMiniGame(wxApi = globalThis.wx) {
               y: rect.topInset + 10,
               width: 60,
               height: 60
-            },
-            {
-              id: "play",
-              x: rect.x + 32,
-              y: rect.y + rect.height * 0.58,
-              width: rect.width - 64,
-              height: 56
-            },
-            {
-              id: "shop",
-              x: rect.x + 32,
-              y: rect.y + rect.height * 0.72,
-              width: rect.width - 64,
-              height: 56
             }
           ];
+
+      if (overlay === "confirm-new-run") {
+        buttons.push(
+          {
+            id: "confirm-new-close",
+            x: confirmNewRunPanel.x + confirmNewRunPanel.width - 44,
+            y: confirmNewRunPanel.y + 20,
+            width: 24,
+            height: 24
+          },
+          {
+            id: "confirm-new-continue",
+            x: confirmNewRunPanel.x + 24,
+            y: confirmNewRunPanel.y + confirmNewRunPanel.height - 138,
+            width: confirmNewRunPanel.width - 48,
+            height: 52
+          },
+          {
+            id: "confirm-new-start",
+            x: confirmNewRunPanel.x + 24,
+            y: confirmNewRunPanel.y + confirmNewRunPanel.height - 76,
+            width: confirmNewRunPanel.width - 48,
+            height: 52
+          }
+        );
+        return buttons;
+      }
+
+      if (overlay === null) {
+        const hasProgress = hasUnfinishedRun();
+        const firstButtonY = hasProgress ? rect.y + rect.height * 0.58 : rect.y + rect.height * 0.66;
+        if (hasProgress) {
+          buttons.push({
+            id: "continue-challenge",
+            x: rect.x + 32,
+            y: firstButtonY,
+            width: rect.width - 64,
+            height: 56
+          });
+        }
+
+        buttons.push(
+          {
+            id: "play",
+            x: rect.x + 32,
+            y: firstButtonY + (hasProgress ? 72 : 0),
+            width: rect.width - 64,
+            height: 56
+          },
+          {
+            id: "shop",
+            x: rect.x + 32,
+            y: firstButtonY + (hasProgress ? 144 : 98),
+            width: rect.width - 64,
+            height: 56
+          }
+        );
+      }
 
       if (overlay === "settings") {
         buttons.push(
@@ -676,10 +781,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     if (overlay === "gameover") {
       buttons.push({
         id: "gameover-close",
-        x: gameOverPanel.x + gameOverPanel.width - 58,
-        y: gameOverPanel.y + 16,
-        width: 42,
-        height: 42
+        x: gameOverPanel.x + gameOverPanel.width - 44,
+        y: gameOverPanel.y + 20,
+        width: 24,
+        height: 24
       });
 
       if (!continueUsedThisRun) {
@@ -692,7 +797,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         });
       } else {
         buttons.push({
-          id: "menu",
+          id: "restart",
           x: gameOverPanel.x + 24,
           y: gameOverPanel.y + gameOverPanel.height - 76,
           width: gameOverPanel.width - 48,
@@ -706,8 +811,20 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
   function handleButton(id) {
     switch (id) {
+      case "continue-challenge":
+        continueFromMenu();
+        break;
       case "play":
         playFromMenu();
+        break;
+      case "confirm-new-close":
+        overlay = null;
+        break;
+      case "confirm-new-continue":
+        continueFromMenu();
+        break;
+      case "confirm-new-start":
+        startRun();
         break;
       case "shop":
         openShop();
@@ -736,6 +853,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         shareToContinue();
         break;
       case "gameover-close":
+        if (!continueUsedThisRun) {
+          continueUsedThisRun = true;
+          break;
+        }
         goToMenu();
         break;
       case "pause":
@@ -776,13 +897,16 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
   }
 
-  function drawButton(context, button, label, primary = false) {
+  function drawButton(context, button, label, primary = false, subtitle = null) {
     if (!button) {
       return;
     }
 
     roundedRect(context, button.x, button.y, button.width, button.height, 24);
-    context.fillStyle = button.id === "share-continue"
+    const isContinueButton = button.id === "share-continue" ||
+      button.id === "continue-challenge" ||
+      button.id === "confirm-new-continue";
+    context.fillStyle = isContinueButton
       ? "#22c55e"
       : primary
         ? "#f2b400"
@@ -791,7 +915,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
           : "rgba(255,255,255,0.08)";
     context.fill();
     if (button.id !== "speed") {
-      context.strokeStyle = button.id === "share-continue"
+      context.strokeStyle = isContinueButton
         ? "rgba(255,255,255,0.18)"
         : primary
           ? "rgba(0,0,0,0.08)"
@@ -799,7 +923,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       context.lineWidth = 1;
       context.stroke();
     }
-    context.fillStyle = primary ? "#1d1d1d" : "#fbfbfb";
+    const usesDarkButtonText = primary || isContinueButton || button.id === "shop";
+    context.fillStyle = usesDarkButtonText ? "#1d1d1d" : "#fbfbfb";
     context.font = "700 20px sans-serif";
     context.textBaseline = "middle";
 
@@ -816,6 +941,15 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
 
     context.textAlign = "center";
+    if (subtitle) {
+      context.font = "700 19px sans-serif";
+      context.fillText(label, button.x + button.width / 2, button.y + button.height / 2 - 8);
+      context.fillStyle = usesDarkButtonText ? "rgba(29,29,29,0.72)" : "rgba(255,255,255,0.78)";
+      context.font = "600 14px sans-serif";
+      context.fillText(subtitle, button.x + button.width / 2, button.y + button.height / 2 + 15);
+      return;
+    }
+
     context.fillText(label, button.x + button.width / 2, button.y + button.height / 2 + 1);
   }
 
@@ -1156,15 +1290,131 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     context.restore();
   }
 
+  function drawColoredTitle(context, x, y) {
+    const colors = ["#ef4444", "#facc15", "#3b82f6", "#22c55e"];
+    const characters = Array.from(texts.title);
+    context.save();
+    context.font = "700 48px sans-serif";
+    context.textAlign = "left";
+    context.textBaseline = "alphabetic";
+    const widths = characters.map((character) => context.measureText(character).width);
+    const totalWidth = widths.reduce((sum, width) => sum + width, 0);
+    let cursorX = x - totalWidth / 2;
+
+    for (let index = 0; index < characters.length; index += 1) {
+      context.fillStyle = colors[index] ?? "#fbfbfb";
+      context.fillText(characters[index], cursorX, y);
+      cursorX += widths[index];
+    }
+
+    context.restore();
+  }
+
+  function drawTrophyIcon(context, x, y, size, color) {
+    const cupTop = y + size * 0.2;
+    const cupWidth = size * 0.5;
+    const cupHeight = size * 0.34;
+    const cupX = x + (size - cupWidth) / 2;
+
+    context.save();
+    context.strokeStyle = color;
+    context.fillStyle = color;
+    context.lineWidth = Math.max(2, size * 0.08);
+    context.lineCap = "round";
+    context.lineJoin = "round";
+
+    roundedRect(context, cupX, cupTop, cupWidth, cupHeight, size * 0.08);
+    context.fill();
+
+    context.beginPath();
+    context.arc(cupX, cupTop + cupHeight * 0.24, size * 0.18, Math.PI * 0.5, Math.PI * 1.5);
+    context.arc(cupX + cupWidth, cupTop + cupHeight * 0.24, size * 0.18, Math.PI * 1.5, Math.PI * 0.5);
+    context.stroke();
+
+    context.fillRect(x + size * 0.44, y + size * 0.54, size * 0.12, size * 0.18);
+    roundedRect(context, x + size * 0.31, y + size * 0.7, size * 0.38, size * 0.1, size * 0.04);
+    context.fill();
+    context.restore();
+  }
+
+  function drawMenuStat(context, x, y, width, label, level, accentColor) {
+    const height = 70;
+    const iconSize = 42;
+    const iconX = x - width / 2 + 20;
+    const labelX = iconX + iconSize + 14;
+    roundedRect(context, x - width / 2, y, width, height, 14);
+    context.fillStyle = "rgba(255,255,255,0.055)";
+    context.fill();
+    context.strokeStyle = "rgba(255,255,255,0.09)";
+    context.lineWidth = 1;
+    context.stroke();
+
+    if (trophyIconAsset.loaded && trophyIconAsset.image) {
+      context.drawImage(trophyIconAsset.image, iconX, y + (height - iconSize) / 2, iconSize, iconSize);
+    } else {
+      drawTrophyIcon(context, iconX, y + (height - iconSize) / 2, iconSize, accentColor);
+    }
+
+    const textAreaRight = x + width / 2 - 18;
+    const textCenterX = labelX + (textAreaRight - labelX) / 2;
+
+    context.fillStyle = accentColor;
+    context.font = "700 16px sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "alphabetic";
+    context.fillText(label, textCenterX, y + 25);
+
+    const baselineY = y + 58;
+    context.font = "800 22px sans-serif";
+    const prefixWidth = context.measureText("第").width;
+    context.font = "900 34px sans-serif";
+    const numberWidth = context.measureText(String(level)).width;
+    context.font = "800 22px sans-serif";
+    const suffixWidth = context.measureText("关").width;
+    const levelTextX = textCenterX - (prefixWidth + 4 + numberWidth + 10 + suffixWidth) / 2;
+
+    context.fillStyle = "#fbfbfb";
+    context.textAlign = "left";
+    context.fillText("第", levelTextX, baselineY);
+
+    context.font = "900 34px sans-serif";
+    context.fillStyle = "#ef4444";
+    context.fillText(String(level), levelTextX + prefixWidth + 4, baselineY);
+
+    context.font = "800 22px sans-serif";
+    context.fillStyle = "#fbfbfb";
+    context.fillText("关", levelTextX + prefixWidth + numberWidth + 10, baselineY);
+  }
+
+  function drawMenuStats(context, rect) {
+    if (!hasBestRecord()) {
+      return;
+    }
+
+    const recordLevel = currentRecordLevel();
+    const statTop = rect.y + 174;
+    const statWidth = Math.min(248, rect.width - 76);
+
+    drawMenuStat(
+      context,
+      screenWidth / 2,
+      statTop,
+      statWidth,
+      texts.bestRecord,
+      recordLevel,
+      "#facc15"
+    );
+  }
+
   function drawCloseButton(context, button) {
     if (!button) {
       return;
     }
 
-    const inset = 7;
+    const inset = 4;
     context.save();
-    context.strokeStyle = "#fbfbfb";
-    context.lineWidth = 5;
+    context.strokeStyle = "rgba(255,255,255,0.48)";
+    context.lineWidth = 3;
     context.lineCap = "round";
     context.beginPath();
     context.moveTo(button.x + inset, button.y + inset);
@@ -1181,17 +1431,19 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     if (screen === "menu") {
       context.fillStyle = "#171717";
       context.fillRect(0, 0, screenWidth, screenHeight);
-      context.fillStyle = "#fbfbfb";
-      context.font = "700 48px sans-serif";
-      context.textAlign = "center";
-      context.fillText(texts.title, screenWidth / 2, rect.y + 138);
-      context.fillStyle = "rgba(255,255,255,0.72)";
-      context.font = "20px sans-serif";
-      context.fillText(texts.menuLineOne, screenWidth / 2, rect.y + 192);
-      context.fillText(texts.menuLineTwo, screenWidth / 2, rect.y + 220);
+      drawColoredTitle(context, screenWidth / 2, rect.y + 138);
+      drawMenuStats(context, rect);
       drawGearButton(context, currentButtons().find((button) => button.id === "menu-settings"));
       drawCoinCounter(context, screenWidth - rect.horizontalPadding, rect.topInset + 40, state.coins);
       if (!overlay) {
+        const progressLevel = unfinishedProgressLevel();
+        drawButton(
+          context,
+          currentButtons().find((button) => button.id === "continue-challenge"),
+          texts.continueChallenge,
+          false,
+          progressLevel ? `${texts.unfinishedProgress}：${texts.levelValue(progressLevel)}` : null
+        );
         drawButton(context, currentButtons().find((button) => button.id === "play"), texts.play, true);
         drawButton(context, currentButtons().find((button) => button.id === "shop"), texts.shop, false);
       }
@@ -1252,9 +1504,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     context.fillRect(0, 0, screenWidth, screenHeight);
     const panel = {
       x: rect.x + 24,
-      y: rect.y + rect.height * 0.24,
+      y: rect.y + rect.height * (overlay === "confirm-new-run" ? 0.16 : 0.24),
       width: rect.width - 48,
-      height: rect.height * 0.54
+      height: rect.height * (overlay === "confirm-new-run" ? 0.68 : 0.54)
     };
     roundedRect(context, panel.x, panel.y, panel.width, panel.height, 28);
     context.fillStyle = "#262626";
@@ -1266,14 +1518,25 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     context.fillStyle = "#fbfbfb";
     context.textAlign = "center";
     context.font = "700 32px sans-serif";
+    const overlayTitle = overlay === "gameover" && !continueUsedThisRun
+      ? texts.shareContinueHintOne
+      : overlay === "pause"
+        ? texts.paused
+        : overlay === "settings"
+          ? texts.settings
+          : overlay === "confirm-new-run"
+            ? texts.unfinishedTitle
+            : texts.runOver;
     context.fillText(
-      overlay === "pause" ? texts.paused : overlay === "settings" ? texts.settings : texts.runOver,
+      overlayTitle,
       screenWidth / 2,
       panel.y + 48
     );
 
-    if (overlay === "gameover") {
-      drawCloseButton(context, currentButtons().find((button) => button.id === "gameover-close"));
+    if (overlay === "gameover" || overlay === "confirm-new-run") {
+      drawCloseButton(context, currentButtons().find((button) =>
+        button.id === (overlay === "gameover" ? "gameover-close" : "confirm-new-close")
+      ));
     }
 
     if (overlay === "settings") {
@@ -1287,13 +1550,14 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     if (overlay === "gameover") {
       if (!continueUsedThisRun) {
-        context.fillStyle = "#fbfbfb";
-        context.font = "800 20px sans-serif";
-        context.fillText(texts.shareContinueHintOne, screenWidth / 2, panel.y + 112);
+        const shareContinueButton = currentButtons().find((button) => button.id === "share-continue");
+        const lineTop = panel.y + 120;
+        const lineBottom = shareContinueButton ? shareContinueButton.y - 14 : panel.y + panel.height - 96;
+        const lineGap = Math.max(24, Math.min(34, (lineBottom - lineTop) / 2));
         context.fillStyle = "rgba(255,255,255,0.82)";
-        context.font = "20px sans-serif";
-        context.fillText(texts.shareContinueHintTwo, screenWidth / 2, panel.y + 154);
-        context.fillText(texts.shareContinueHintThree, screenWidth / 2, panel.y + 184);
+        context.font = "17px sans-serif";
+        context.fillText(texts.shareContinueHintTwo, screenWidth / 2, lineTop);
+        context.fillText(texts.shareContinueHintThree, screenWidth / 2, lineTop + lineGap);
       } else {
         context.fillStyle = "rgba(255,255,255,0.82)";
         context.font = "22px sans-serif";
@@ -1301,8 +1565,24 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       }
     }
 
+    if (overlay === "confirm-new-run") {
+      const progressLevel = unfinishedProgressLevel();
+      context.fillStyle = "rgba(255,255,255,0.82)";
+      context.font = "20px sans-serif";
+      context.textAlign = "center";
+      context.fillText(
+        progressLevel ? `${texts.unfinishedProgress}：${texts.levelValue(progressLevel)}` : texts.unfinishedLineOne,
+        screenWidth / 2,
+        panel.y + 96
+      );
+      context.fillStyle = "rgba(255,255,255,0.68)";
+      context.font = "18px sans-serif";
+      context.fillText(texts.unfinishedLineOne, screenWidth / 2, panel.y + 126);
+      context.fillText(texts.unfinishedLineTwo, screenWidth / 2, panel.y + 154);
+    }
+
     for (const button of currentButtons()) {
-      if (["play", "pause", "speed", "menu-settings", "gameover-close"].includes(button.id)) {
+      if (["play", "pause", "speed", "menu-settings", "gameover-close", "confirm-new-close"].includes(button.id)) {
         continue;
       }
 
@@ -1312,7 +1592,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         menu: texts.mainMenu,
         "settings-done": texts.done,
         "share-continue": texts.shareContinue,
-        restart: texts.restart
+        restart: texts.restart,
+        "confirm-new-continue": texts.continueChallenge,
+        "confirm-new-start": texts.startNew
       };
 
       if (button.id === "toggle-sound") {
@@ -1327,6 +1609,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         button.id === "resume" ||
           (overlay === "gameover" && button.id === "menu") ||
           button.id === "share-continue" ||
+          button.id === "confirm-new-continue" ||
+          button.id === "confirm-new-start" ||
           button.id === "restart" ||
           button.id === "settings-done"
       );
@@ -1486,8 +1770,6 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   wxApi.onHide?.(() => {
     persistProgress(true);
   });
-
-  tryResumeSavedProgress();
 
   function loop() {
     const now = Date.now();
