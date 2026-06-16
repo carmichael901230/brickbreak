@@ -37,6 +37,9 @@ const texts = {
   shareContinueHintOne: "球球还没放弃！",
   shareContinueHintTwo: "分享到微信群立即复活 +1",
   shareContinueHintThree: "继续冲击更高分!",
+  newRecord: "新纪录",
+  brokePreviousRecord: (level) => `你已突破之前的第 ${level} 关纪录`,
+  currentPlay: "本局到达",
   unfinishedTitle: "还有未完成的游戏",
   unfinishedLineOne: "继续上一局，还是开始新游戏？",
   unfinishedLineTwo: "开始新游戏会放弃当前进度。",
@@ -206,6 +209,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   const coinIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/dollar.png");
   const speedIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/fast-forward.png");
   const trophyIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/trophy.png");
+  const confettiIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/confetti.png");
   const ballSkinAssets = Object.fromEntries(
     GAME_CONFIG.skins.ball
       .map((skin) => skin.gameImage ?? skin.image)
@@ -235,6 +239,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     poolSize: 2,
     volume: 0.72
   });
+  const cheerSoundPlayer = createSoundPlayer(wxApi, "src/assets/sound/cheer.mp3", {
+    volume: 0.72
+  });
 
   const boardGenerator = createBoardGenerator(GAME_CONFIG);
   const game = createGameController({
@@ -251,6 +258,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     if (type === "coin") {
       coinSoundPlayer.play();
     }
+    if (type === "newRecord") {
+      cheerSoundPlayer.play();
+    }
   });
 
   let screen = "menu";
@@ -265,6 +275,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let lastSavedProgressAt = 0;
   let hasStartedRun = false;
   let continueUsedThisRun = false;
+  let gameOverResult = null;
   let lastSavedCoins = storage.loadCoins();
   let lastSavedSkinsJson = JSON.stringify(storage.loadSkins());
   let shopCategory = "brick";
@@ -409,6 +420,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     return Math.max(1, Math.floor(bestScore) + 1);
   }
 
+  function scoreToLevel(score) {
+    return Math.max(1, Math.floor(score) + 1);
+  }
+
   function hasBestRecord() {
     return bestScore > 0;
   }
@@ -440,6 +455,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     overlay = "pause";
     hasStartedRun = true;
     continueUsedThisRun = progress.continueUsedThisRun === true;
+    gameOverResult = null;
     bestScore = Math.max(bestScore, Number(progress.bestScore) || 0);
     tutorialIdleTime = 0;
     tutorialDismissed = true;
@@ -470,6 +486,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     game.restart();
     hasStartedRun = true;
     continueUsedThisRun = false;
+    gameOverResult = null;
     screen = "game";
     overlay = null;
     tutorialIdleTime = 0;
@@ -516,6 +533,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     overlay = null;
     hasStartedRun = true;
     pointerActive = false;
+    gameOverResult = null;
     tutorialIdleTime = 0;
     tutorialDismissed = true;
     persistProgress(true);
@@ -709,8 +727,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
       if (overlay === "settings") {
         buttons.push(
-          { id: "toggle-sound", x: rect.x + rect.width - 142, y: rect.y + rect.height * 0.47, width: 106, height: 48 },
-          { id: "settings-done", x: rect.x + 36, y: rect.y + rect.height * 0.68, width: rect.width - 72, height: 52 }
+          { id: "toggle-sound", x: rect.x + rect.width - 166, y: rect.y + rect.height * 0.47, width: 106, height: 48 },
+          { id: "settings-done", x: rect.x + 60, y: rect.y + rect.height * 0.64, width: rect.width - 120, height: 52 }
         );
       }
 
@@ -1406,6 +1424,78 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     );
   }
 
+  function drawLevelText(context, centerX, baselineY, level, numberSize = 34) {
+    context.font = "800 22px sans-serif";
+    const prefixWidth = context.measureText("第").width;
+    context.font = `900 ${numberSize}px sans-serif`;
+    const numberWidth = context.measureText(String(level)).width;
+    context.font = "800 22px sans-serif";
+    const suffixWidth = context.measureText("关").width;
+    const startX = centerX - (prefixWidth + 4 + numberWidth + 10 + suffixWidth) / 2;
+
+    context.textAlign = "left";
+    context.fillStyle = "#fbfbfb";
+    context.font = "800 22px sans-serif";
+    context.fillText("第", startX, baselineY);
+    context.fillStyle = "#ef4444";
+    context.font = `900 ${numberSize}px sans-serif`;
+    context.fillText(String(level), startX + prefixWidth + 4, baselineY);
+    context.fillStyle = "#fbfbfb";
+    context.font = "800 22px sans-serif";
+    context.fillText("关", startX + prefixWidth + 4 + numberWidth + 10, baselineY);
+    context.textAlign = "center";
+  }
+
+  function drawFinalScoreResult(context, panel, result, state) {
+    const currentLevel = result?.currentLevel ?? scoreToLevel(state.score);
+    const previousRecordLevel = result?.previousRecordLevel ?? currentRecordLevel();
+    const brokeRecord = result?.brokeRecord === true;
+    const centerX = screenWidth / 2;
+
+    if (brokeRecord) {
+      const iconSize = 44;
+      const iconY = panel.y + 82;
+      if (confettiIconAsset.loaded && confettiIconAsset.image) {
+        context.drawImage(confettiIconAsset.image, centerX - iconSize / 2, iconY, iconSize, iconSize);
+      }
+
+      context.fillStyle = "#facc15";
+      context.font = "800 20px sans-serif";
+      context.textAlign = "center";
+      context.fillText(texts.newRecord, centerX, panel.y + 150);
+      drawLevelText(context, centerX, panel.y + 190, currentLevel, 38);
+      context.fillStyle = "rgba(255,255,255,0.82)";
+      context.font = "17px sans-serif";
+      context.fillText(texts.brokePreviousRecord(previousRecordLevel), centerX, panel.y + 222);
+      return;
+    }
+
+    context.fillStyle = "rgba(255,255,255,0.74)";
+    context.font = "17px sans-serif";
+    context.textAlign = "center";
+    context.fillText(texts.currentPlay, centerX, panel.y + 104);
+    drawLevelText(context, centerX, panel.y + 144, currentLevel, 34);
+
+    const iconSize = 28;
+    const rowY = panel.y + 190;
+    const rowText = `${texts.bestRecord}：${texts.levelValue(previousRecordLevel)}`;
+    context.font = "700 17px sans-serif";
+    const textWidth = context.measureText(rowText).width;
+    const gap = 8;
+    const startX = centerX - (iconSize + gap + textWidth) / 2;
+    if (trophyIconAsset.loaded && trophyIconAsset.image) {
+      context.drawImage(trophyIconAsset.image, startX, rowY - iconSize / 2, iconSize, iconSize);
+    } else {
+      drawTrophyIcon(context, startX, rowY - iconSize / 2, iconSize, "#facc15");
+    }
+    context.fillStyle = "#facc15";
+    context.textAlign = "left";
+    context.textBaseline = "middle";
+    context.fillText(rowText, startX + iconSize + gap, rowY + 1);
+    context.textAlign = "center";
+    context.textBaseline = "alphabetic";
+  }
+
   function drawCloseButton(context, button) {
     if (!button) {
       return;
@@ -1559,9 +1649,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         context.fillText(texts.shareContinueHintTwo, screenWidth / 2, lineTop);
         context.fillText(texts.shareContinueHintThree, screenWidth / 2, lineTop + lineGap);
       } else {
-        context.fillStyle = "rgba(255,255,255,0.82)";
-        context.font = "22px sans-serif";
-        context.fillText(texts.reachedRound(state.round), screenWidth / 2, panel.y + 132);
+        drawFinalScoreResult(context, panel, gameOverResult, state);
       }
     }
 
@@ -1792,6 +1880,17 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
       game.update(deltaTime);
       if (game.getState().state === "gameover") {
+        const finalState = game.getState();
+        const previousBestScore = bestScore;
+        const currentScore = Math.max(0, Math.floor(finalState.score));
+        gameOverResult = {
+          currentLevel: scoreToLevel(currentScore),
+          previousRecordLevel: scoreToLevel(previousBestScore),
+          brokeRecord: currentScore > previousBestScore
+        };
+        if (gameOverResult.brokeRecord) {
+          audioBus.emit("newRecord");
+        }
         overlay = "gameover";
         hasStartedRun = false;
         clearSavedProgress();
