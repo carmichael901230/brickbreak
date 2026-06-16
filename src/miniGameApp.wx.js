@@ -277,6 +277,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let continueUsedThisRun = false;
   let gameOverResult = null;
   let newRecordCheerPlayed = false;
+  let recordConfetti = null;
   let lastSavedCoins = storage.loadCoins();
   let lastSavedSkinsJson = JSON.stringify(storage.loadSkins());
   let shopCategory = "brick";
@@ -429,6 +430,73 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     return bestScore > 0;
   }
 
+  function resetRecordConfetti() {
+    recordConfetti = null;
+  }
+
+  function startRecordConfetti() {
+    if (recordConfetti?.started) {
+      return;
+    }
+
+    const colors = ["#facc15", "#ef4444", "#22c55e", "#3b82f6", "#f97316", "#e879f9"];
+    const particleCount = 50;
+    const centerX = screenWidth / 2;
+    const horizontalSpread = screenWidth * 0.76;
+    recordConfetti = {
+      started: true,
+      particles: Array.from({ length: particleCount }, (_, index) => {
+        const size = 5 + Math.random() * 6;
+        return {
+          x: centerX + (Math.random() - 0.5) * horizontalSpread,
+          y: screenHeight + 8 + Math.random() * 28,
+          vx: (Math.random() - 0.5) * 210,
+          vy: -780 - Math.random() * 360 - (index % 5) * 18,
+          rotation: Math.random() * Math.PI * 2,
+          rotationSpeed: (Math.random() - 0.5) * 9,
+          width: size * (0.7 + Math.random() * 0.7),
+          height: size * (1.7 + Math.random() * 1.2),
+          color: colors[index % colors.length],
+          gravity: 980 + Math.random() * 220
+        };
+      })
+    };
+  }
+
+  function updateRecordConfetti(deltaTime) {
+    if (!recordConfetti?.particles?.length) {
+      return;
+    }
+
+    const cappedDelta = Math.min(deltaTime, 0.033);
+    for (const particle of recordConfetti.particles) {
+      particle.vy += particle.gravity * cappedDelta;
+      particle.x += particle.vx * cappedDelta;
+      particle.y += particle.vy * cappedDelta;
+      particle.rotation += particle.rotationSpeed * cappedDelta;
+    }
+
+    recordConfetti.particles = recordConfetti.particles.filter((particle) => particle.y < screenHeight + 90);
+  }
+
+  function drawRecordConfetti(context) {
+    if (!recordConfetti?.particles?.length) {
+      return;
+    }
+
+    context.save();
+    context.globalAlpha = 0.88;
+    for (const particle of recordConfetti.particles) {
+      context.save();
+      context.translate(particle.x, particle.y);
+      context.rotate(particle.rotation);
+      context.fillStyle = particle.color;
+      context.fillRect(-particle.width / 2, -particle.height / 2, particle.width, particle.height);
+      context.restore();
+    }
+    context.restore();
+  }
+
   function unfinishedProgressLevel() {
     if (hasActiveUnfinishedRun()) {
       return Math.max(1, Math.floor(game.getState().round));
@@ -458,6 +526,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     continueUsedThisRun = progress.continueUsedThisRun === true;
     gameOverResult = null;
     newRecordCheerPlayed = false;
+    resetRecordConfetti();
     bestScore = Math.max(bestScore, Number(progress.bestScore) || 0);
     tutorialIdleTime = 0;
     tutorialDismissed = true;
@@ -490,6 +559,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     continueUsedThisRun = false;
     gameOverResult = null;
     newRecordCheerPlayed = false;
+    resetRecordConfetti();
     screen = "game";
     overlay = null;
     tutorialIdleTime = 0;
@@ -514,6 +584,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     screen = "menu";
     pointerActive = false;
     tutorialIdleTime = 0;
+    resetRecordConfetti();
   }
 
   function shareToContinue() {
@@ -538,6 +609,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     pointerActive = false;
     gameOverResult = null;
     newRecordCheerPlayed = false;
+    resetRecordConfetti();
     tutorialIdleTime = 0;
     tutorialDismissed = true;
     persistProgress(true);
@@ -1619,6 +1691,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     context.fillStyle = "rgba(0,0,0,0.54)";
     context.fillRect(0, 0, screenWidth, screenHeight);
+
     const gameOverPanelYScale = overlay === "gameover" && continueUsedThisRun ? 0.16 : 0.24;
     const gameOverPanelHeightScale = overlay === "gameover" && continueUsedThisRun ? 0.68 : 0.54;
     const panelYScale = overlay === "confirm-new-run" || overlay === "pause"
@@ -1633,6 +1706,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       width: rect.width - 48,
       height: rect.height * panelHeightScale
     };
+
     roundedRect(context, panel.x, panel.y, panel.width, panel.height, 28);
     context.fillStyle = "#262626";
     context.fill();
@@ -1735,8 +1809,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
           button.id === "confirm-new-continue" ||
           button.id === "confirm-new-start" ||
           button.id === "restart" ||
-          button.id === "settings-done"
+        button.id === "settings-done"
       );
+    }
+
+    if (overlay === "gameover" && continueUsedThisRun && gameOverResult?.brokeRecord) {
+      drawRecordConfetti(context);
     }
   }
 
@@ -1924,6 +2002,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
           brokeRecord: currentScore > previousBestScore
         };
         newRecordCheerPlayed = false;
+        resetRecordConfetti();
         overlay = "gameover";
         hasStartedRun = false;
         clearSavedProgress();
@@ -1939,6 +2018,18 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     ) {
       audioBus.emit("newRecord");
       newRecordCheerPlayed = true;
+    }
+
+    if (
+      screen === "game" &&
+      overlay === "gameover" &&
+      continueUsedThisRun &&
+      gameOverResult?.brokeRecord
+    ) {
+      startRecordConfetti();
+      updateRecordConfetti(deltaTime);
+    } else if (recordConfetti) {
+      resetRecordConfetti();
     }
 
     syncBestScore();
