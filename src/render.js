@@ -432,13 +432,16 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
       context.lineWidth = 3;
       context.strokeStyle = "#ffcf8c";
       context.stroke();
+      const plusArm = Math.max(8, config.pickupRadius * 0.48);
+      const plusWidth = Math.max(5, config.pickupRadius * 0.24);
       context.beginPath();
-      context.moveTo(centerX - 6, centerY);
-      context.lineTo(centerX + 6, centerY);
-      context.moveTo(centerX, centerY - 6);
-      context.lineTo(centerX, centerY + 6);
+      context.moveTo(centerX - plusArm, centerY);
+      context.lineTo(centerX + plusArm, centerY);
+      context.moveTo(centerX, centerY - plusArm);
+      context.lineTo(centerX, centerY + plusArm);
       context.strokeStyle = "#fff8ed";
-      context.lineWidth = 2;
+      context.lineWidth = plusWidth;
+      context.lineCap = "round";
       context.stroke();
     }
   }
@@ -489,14 +492,32 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
       return;
     }
 
+    const startX = state.launcherX;
+    const startY = state.arena.launcherY;
+    const dx = state.aimPoint.x - startX;
+    const dy = state.aimPoint.y - startY;
+    const length = Math.hypot(dx, dy);
+    if (length <= 0) {
+      return;
+    }
+
+    const spacing = Math.max(18, config.ballRadius * 1.35);
+    const radius = Math.max(3.2, config.ballRadius * 0.24);
+    const firstDotOffset = Math.max(20, config.ballRadius * 1.5);
+    const unitX = dx / length;
+    const unitY = dy / length;
+
     context.save();
-    context.strokeStyle = "rgba(255,255,255,0.45)";
-    context.setLineDash([8, 12]);
-    context.lineWidth = 2;
-    context.beginPath();
-    context.moveTo(state.launcherX, state.arena.launcherY);
-    context.lineTo(state.aimPoint.x, state.aimPoint.y);
-    context.stroke();
+    context.fillStyle = "rgba(255,255,255,0.92)";
+    context.shadowColor = "rgba(255,255,255,0.55)";
+    context.shadowBlur = 5;
+
+    for (let distance = firstDotOffset; distance < length; distance += spacing) {
+      context.beginPath();
+      context.arc(startX + unitX * distance, startY + unitY * distance, radius, 0, Math.PI * 2);
+      context.fill();
+    }
+
     context.restore();
   }
 

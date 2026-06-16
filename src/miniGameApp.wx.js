@@ -276,6 +276,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let hasStartedRun = false;
   let continueUsedThisRun = false;
   let gameOverResult = null;
+  let newRecordCheerPlayed = false;
   let lastSavedCoins = storage.loadCoins();
   let lastSavedSkinsJson = JSON.stringify(storage.loadSkins());
   let shopCategory = "brick";
@@ -456,6 +457,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     hasStartedRun = true;
     continueUsedThisRun = progress.continueUsedThisRun === true;
     gameOverResult = null;
+    newRecordCheerPlayed = false;
     bestScore = Math.max(bestScore, Number(progress.bestScore) || 0);
     tutorialIdleTime = 0;
     tutorialDismissed = true;
@@ -487,6 +489,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     hasStartedRun = true;
     continueUsedThisRun = false;
     gameOverResult = null;
+    newRecordCheerPlayed = false;
     screen = "game";
     overlay = null;
     tutorialIdleTime = 0;
@@ -534,6 +537,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     hasStartedRun = true;
     pointerActive = false;
     gameOverResult = null;
+    newRecordCheerPlayed = false;
     tutorialIdleTime = 0;
     tutorialDismissed = true;
     persistProgress(true);
@@ -641,6 +645,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   function currentButtons() {
     const rect = canvasRect();
     const layout = shopLayout();
+    const gameOverPanelYScale = continueUsedThisRun ? 0.16 : 0.24;
+    const gameOverPanelHeightScale = continueUsedThisRun ? 0.68 : 0.54;
     const confirmNewRunPanel = {
       x: rect.x + 24,
       y: rect.y + rect.height * 0.16,
@@ -649,9 +655,15 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     };
     const gameOverPanel = {
       x: rect.x + 24,
-      y: rect.y + rect.height * 0.24,
+      y: rect.y + rect.height * gameOverPanelYScale,
       width: rect.width - 48,
-      height: rect.height * 0.54
+      height: rect.height * gameOverPanelHeightScale
+    };
+    const pausePanel = {
+      x: rect.x + 24,
+      y: rect.y + rect.height * 0.16,
+      width: rect.width - 48,
+      height: rect.height * 0.68
     };
 
     if (screen === "menu") {
@@ -782,10 +794,17 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
 
     if (overlay === "pause") {
+      const buttonHeight = 52;
+      const contentTop = pausePanel.y + 82;
+      const contentBottom = pausePanel.y + pausePanel.height - 28;
+      const usableHeight = Math.max(buttonHeight * 3, contentBottom - contentTop);
+      const buttonGap = clamp((usableHeight - buttonHeight * 3) / 2, 10, 24);
+      const buttonStackHeight = buttonHeight * 3 + buttonGap * 2;
+      const firstButtonY = contentTop + Math.max(0, (usableHeight - buttonStackHeight) / 2);
       buttons.push(
-        { id: "resume", x: rect.x + 36, y: rect.y + rect.height * 0.40, width: rect.width - 72, height: 52 },
-        { id: "settings", x: rect.x + 36, y: rect.y + rect.height * 0.53, width: rect.width - 72, height: 52 },
-        { id: "menu", x: rect.x + 36, y: rect.y + rect.height * 0.66, width: rect.width - 72, height: 52 }
+        { id: "resume", x: pausePanel.x + 36, y: firstButtonY, width: pausePanel.width - 72, height: buttonHeight },
+        { id: "settings", x: pausePanel.x + 36, y: firstButtonY + buttonHeight + buttonGap, width: pausePanel.width - 72, height: buttonHeight },
+        { id: "menu", x: pausePanel.x + 36, y: firstButtonY + (buttonHeight + buttonGap) * 2, width: pausePanel.width - 72, height: buttonHeight }
       );
     }
 
@@ -1450,34 +1469,42 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     const currentLevel = result?.currentLevel ?? scoreToLevel(state.score);
     const previousRecordLevel = result?.previousRecordLevel ?? currentRecordLevel();
     const brokeRecord = result?.brokeRecord === true;
+    const restartButton = currentButtons().find((button) => button.id === "restart");
+    const contentTop = panel.y + 82;
+    const contentBottom = restartButton ? restartButton.y - 16 : panel.y + panel.height - 92;
+    const availableHeight = Math.max(116, contentBottom - contentTop);
+    const compact = availableHeight < 150;
     const centerX = screenWidth / 2;
 
     if (brokeRecord) {
-      const iconSize = 44;
-      const iconY = panel.y + 82;
+      const iconSize = compact ? 34 : 44;
+      const iconY = contentTop;
+      const labelY = iconY + iconSize + (compact ? 18 : 24);
+      const levelY = labelY + (compact ? 34 : 40);
+      const messageY = Math.min(contentBottom, levelY + (compact ? 28 : 32));
       if (confettiIconAsset.loaded && confettiIconAsset.image) {
         context.drawImage(confettiIconAsset.image, centerX - iconSize / 2, iconY, iconSize, iconSize);
       }
 
       context.fillStyle = "#facc15";
-      context.font = "800 20px sans-serif";
+      context.font = `800 ${compact ? 18 : 20}px sans-serif`;
       context.textAlign = "center";
-      context.fillText(texts.newRecord, centerX, panel.y + 150);
-      drawLevelText(context, centerX, panel.y + 190, currentLevel, 38);
+      context.fillText(texts.newRecord, centerX, labelY);
+      drawLevelText(context, centerX, levelY, currentLevel, compact ? 32 : 38);
       context.fillStyle = "rgba(255,255,255,0.82)";
-      context.font = "17px sans-serif";
-      context.fillText(texts.brokePreviousRecord(previousRecordLevel), centerX, panel.y + 222);
+      context.font = `${compact ? 15 : 17}px sans-serif`;
+      context.fillText(texts.brokePreviousRecord(previousRecordLevel), centerX, messageY);
       return;
     }
 
     context.fillStyle = "rgba(255,255,255,0.74)";
-    context.font = "17px sans-serif";
+    context.font = `${compact ? 15 : 17}px sans-serif`;
     context.textAlign = "center";
-    context.fillText(texts.currentPlay, centerX, panel.y + 104);
-    drawLevelText(context, centerX, panel.y + 144, currentLevel, 34);
+    context.fillText(texts.currentPlay, centerX, contentTop + (compact ? 16 : 22));
+    drawLevelText(context, centerX, contentTop + (compact ? 52 : 62), currentLevel, compact ? 30 : 34);
 
-    const iconSize = 28;
-    const rowY = panel.y + 190;
+    const iconSize = compact ? 24 : 28;
+    const rowY = Math.min(contentBottom, contentTop + (compact ? 96 : 108));
     const rowText = `${texts.bestRecord}：${texts.levelValue(previousRecordLevel)}`;
     context.font = "700 17px sans-serif";
     const textWidth = context.measureText(rowText).width;
@@ -1592,11 +1619,19 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     context.fillStyle = "rgba(0,0,0,0.54)";
     context.fillRect(0, 0, screenWidth, screenHeight);
+    const gameOverPanelYScale = overlay === "gameover" && continueUsedThisRun ? 0.16 : 0.24;
+    const gameOverPanelHeightScale = overlay === "gameover" && continueUsedThisRun ? 0.68 : 0.54;
+    const panelYScale = overlay === "confirm-new-run" || overlay === "pause"
+      ? 0.16
+      : gameOverPanelYScale;
+    const panelHeightScale = overlay === "confirm-new-run" || overlay === "pause"
+      ? 0.68
+      : gameOverPanelHeightScale;
     const panel = {
       x: rect.x + 24,
-      y: rect.y + rect.height * (overlay === "confirm-new-run" ? 0.16 : 0.24),
+      y: rect.y + rect.height * panelYScale,
       width: rect.width - 48,
-      height: rect.height * (overlay === "confirm-new-run" ? 0.68 : 0.54)
+      height: rect.height * panelHeightScale
     };
     roundedRect(context, panel.x, panel.y, panel.width, panel.height, 28);
     context.fillStyle = "#262626";
@@ -1888,13 +1923,22 @@ export function bootMiniGame(wxApi = globalThis.wx) {
           previousRecordLevel: scoreToLevel(previousBestScore),
           brokeRecord: currentScore > previousBestScore
         };
-        if (gameOverResult.brokeRecord) {
-          audioBus.emit("newRecord");
-        }
+        newRecordCheerPlayed = false;
         overlay = "gameover";
         hasStartedRun = false;
         clearSavedProgress();
       }
+    }
+
+    if (
+      screen === "game" &&
+      overlay === "gameover" &&
+      continueUsedThisRun &&
+      gameOverResult?.brokeRecord &&
+      !newRecordCheerPlayed
+    ) {
+      audioBus.emit("newRecord");
+      newRecordCheerPlayed = true;
     }
 
     syncBestScore();
