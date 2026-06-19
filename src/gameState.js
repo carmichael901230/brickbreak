@@ -114,7 +114,7 @@ function restorePoint(value, fallback = null) {
   return { x, y };
 }
 
-export function createInitialGameState(config = GAME_CONFIG, coins = 0, skins = null) {
+export function createInitialGameState(config = GAME_CONFIG, coins = 0, skins = null, hearts = 0) {
   const arena = buildArena(config);
 
   return {
@@ -124,6 +124,7 @@ export function createInitialGameState(config = GAME_CONFIG, coins = 0, skins = 
     score: 0,
     bestScore: 0,
     coins: Math.max(0, Math.floor(coins)),
+    heartCount: Math.max(0, Math.floor(hearts)),
     skins: normalizeSkins(skins, config),
     ballsOwned: 1,
     ballsLaunched: 0,
@@ -146,6 +147,7 @@ export function createInitialGameState(config = GAME_CONFIG, coins = 0, skins = 
     coinsOnBoard: [],
     balls: [createBall(config.width / 2, arena.launcherY)],
     particles: [],
+    heartConsumeEffect: null,
     bannerTimer: config.effects.roundBannerTime,
     firstReturnX: null,
     gameOver: false
@@ -155,11 +157,12 @@ export function createInitialGameState(config = GAME_CONFIG, coins = 0, skins = 
 export function createGameController({
   config = GAME_CONFIG,
   initialCoins = 0,
+  initialHearts = 0,
   initialSkins = null,
   boardGenerator,
   audioBus
 }) {
-  let gameState = createInitialGameState(config, initialCoins, initialSkins);
+  let gameState = createInitialGameState(config, initialCoins, initialSkins, initialHearts);
 
   function resolveAimPreview(point) {
     const dragVector = {
@@ -242,7 +245,7 @@ export function createGameController({
   }
 
   function restart() {
-    gameState = createInitialGameState(config, gameState.coins, gameState.skins);
+    gameState = createInitialGameState(config, gameState.coins, gameState.skins, gameState.heartCount);
     spawnRound();
   }
 
@@ -259,6 +262,37 @@ export function createGameController({
     gameState.aimPoint = null;
     gameState.launchDirection = null;
     resetRoundEntities();
+    return true;
+  }
+
+  function consumeHeartContinue() {
+    if (gameState.state !== "gameover" || gameState.heartCount <= 0) {
+      return false;
+    }
+
+    gameState.heartCount = Math.max(0, gameState.heartCount - 1);
+    if (!continueFromGameOver()) {
+      return false;
+    }
+
+    gameState.heartConsumeEffect = {
+      life: 1.05,
+      maxLife: 1.05
+    };
+    const centerX = gameState.arena.width / 2;
+    const centerY = gameState.arena.height / 2;
+    for (let index = 0; index < 18; index += 1) {
+      const angle = (Math.PI * 2 * index) / 18;
+      gameState.particles.push({
+        x: centerX,
+        y: centerY,
+        vx: Math.cos(angle) * (80 + Math.random() * 80),
+        vy: Math.sin(angle) * (80 + Math.random() * 80),
+        life: config.effects.particleLife * 2.1,
+        maxLife: config.effects.particleLife * 2.1,
+        tone: "heart"
+      });
+    }
     return true;
   }
 
@@ -303,7 +337,7 @@ export function createGameController({
       return false;
     }
 
-    const nextState = createInitialGameState(config, gameState.coins, gameState.skins);
+    const nextState = createInitialGameState(config, gameState.coins, gameState.skins, gameState.heartCount);
     const allowedStates = new Set(["aiming", "launching", "resolving"]);
     if (!allowedStates.has(snapshot.state)) {
       return false;
@@ -362,7 +396,7 @@ export function createGameController({
   }
 
   function startAim(point) {
-    if (gameState.state !== "aiming") {
+    if (gameState.state !== "aiming" || gameState.heartConsumeEffect) {
       return;
     }
 
@@ -375,7 +409,7 @@ export function createGameController({
   }
 
   function updateAim(point) {
-    if (!gameState.aiming || gameState.state !== "aiming") {
+    if (!gameState.aiming || gameState.state !== "aiming" || gameState.heartConsumeEffect) {
       return;
     }
 
@@ -384,7 +418,7 @@ export function createGameController({
   }
 
   function releaseAim(point) {
-    if (!gameState.aiming || gameState.state !== "aiming") {
+    if (!gameState.aiming || gameState.state !== "aiming" || gameState.heartConsumeEffect) {
       return;
     }
 
@@ -601,6 +635,13 @@ export function createGameController({
       gameState.bannerTimer = Math.max(0, gameState.bannerTimer - cappedDelta);
     }
 
+    if (gameState.heartConsumeEffect) {
+      gameState.heartConsumeEffect.life = Math.max(0, gameState.heartConsumeEffect.life - cappedDelta);
+      if (gameState.heartConsumeEffect.life <= 0) {
+        gameState.heartConsumeEffect = null;
+      }
+    }
+
     if (gameState.state === "launching" || gameState.state === "resolving") {
       gameState.volleyElapsed += cappedDelta;
       if (!gameState.speedUpAvailable && gameState.volleyElapsed >= gameState.nextSpeedUpAt) {
@@ -665,6 +706,11 @@ export function createGameController({
     return true;
   }
 
+  function grantRewards({ coins = 0, hearts = 0 } = {}) {
+    gameState.coins += Math.max(0, Math.floor(coins));
+    gameState.heartCount += Math.max(0, Math.floor(hearts));
+  }
+
   function setSkins(skins) {
     gameState.skins = normalizeSkins(skins, config);
   }
@@ -673,9 +719,11 @@ export function createGameController({
 
   return {
     activateSpeedUp,
+    consumeHeartContinue,
     continueFromGameOver,
     exportSnapshot,
     importSnapshot,
+    grantRewards,
     restart,
     setSkins,
     spendCoins,

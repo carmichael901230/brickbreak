@@ -40,6 +40,26 @@ test("storage adapter persists and loads coins", () => {
   assert.equal(adapter.loadCoins(), 7);
 });
 
+test("storage adapter persists and loads hearts", () => {
+  const storage = createMemoryStorage();
+  const adapter = createStorageAdapter(storage);
+  adapter.saveHearts(3);
+  assert.equal(adapter.loadHearts(), 3);
+});
+
+test("storage adapter persists and loads daily check-in state", () => {
+  const storage = createMemoryStorage();
+  const adapter = createStorageAdapter(storage);
+  const checkIn = {
+    lastCheckInDate: "2026-06-17",
+    checkInStreak: 4,
+    lastRewardDay: 4
+  };
+
+  adapter.saveDailyCheckIn(checkIn);
+  assert.deepEqual(adapter.loadDailyCheckIn(), checkIn);
+});
+
 test("storage adapter persists and loads skin ownership", () => {
   const storage = createMemoryStorage();
   const adapter = createStorageAdapter(storage);

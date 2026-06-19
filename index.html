@@ -13,6 +13,10 @@
           <img src="./src/assets/pic/dollar.png" alt="" />
           <strong id="menuCoinValue">0</strong>
         </div>
+        <div id="menuHeartCounter" class="coin-counter menu-hearts is-hidden" aria-label="Hearts">
+          <img src="./src/assets/pic/heart.png" alt="" />
+          <strong id="menuHeartValue">0</strong>
+        </div>
         <div class="menu-card">
           <p class="menu-kicker">Vertical Arcade</p>
           <h1 class="menu-title">Arc Cascade</h1>
@@ -40,9 +44,15 @@
             <strong id="roundValue">1</strong>
           </div>
           <div class="hud-right">
-            <div class="coin-counter" aria-label="Coins">
-              <img src="./src/assets/pic/dollar.png" alt="" />
-              <strong id="coinValue">0</strong>
+            <div class="hud-resource-stack">
+              <div class="coin-counter" aria-label="Coins">
+                <img src="./src/assets/pic/dollar.png" alt="" />
+                <strong id="coinValue">0</strong>
+              </div>
+              <div id="heartCounter" class="coin-counter heart-counter is-hidden" aria-label="Hearts">
+                <img src="./src/assets/pic/heart.png" alt="" />
+                <strong id="heartValue">0</strong>
+              </div>
             </div>
           </div>
         </header>
@@ -111,6 +121,31 @@
           <button id="restartRunButton" class="primary-button" type="button">Restart</button>
           <button id="gameOverMenuButton" class="secondary-button" type="button">Main Menu</button>
         </div>
+      </div>
+    </div>
+
+    <div id="heartContinueOverlay" class="overlay is-hidden" aria-hidden="true">
+      <div class="overlay-card game-over-card">
+        <h2>Use Heart?</h2>
+        <p class="overlay-copy">Spend 1 heart to continue this run.</p>
+        <div class="overlay-action-stack">
+          <button id="useHeartButton" class="primary-button heart-action-button" type="button">
+            <img src="./src/assets/pic/heart.png" alt="" />
+            立即复活
+          </button>
+          <button id="declineHeartButton" class="secondary-button" type="button">放弃</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="checkInOverlay" class="overlay is-hidden" aria-hidden="true">
+      <div class="overlay-card check-in-card">
+        <h2>每日签到</h2>
+        <p id="checkInStreakText" class="overlay-copy">连续签到 1 天</p>
+        <div id="checkInRewardRow" class="check-in-reward-row"></div>
+        <div id="checkInDays" class="check-in-days"></div>
+        <p id="checkInResetText" class="overlay-copy">每天登录可保持连续奖励，中断一天将从第 1 天重新开始。</p>
+        <button id="claimCheckInButton" class="primary-button" type="button">领取</button>
       </div>
     </div>
 

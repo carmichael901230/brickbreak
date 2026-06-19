@@ -111,6 +111,7 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
   const pixelRatio = options.pixelRatio || globalThis.devicePixelRatio || 1;
   const showRoundBanner = options.showRoundBanner !== false;
   const coinAsset = options.coinAsset || createImageAsset("src/assets/pic/dollar.png");
+  const heartAsset = options.heartAsset || createImageAsset("src/assets/pic/heart.png");
   const ballSkinAssets = createSkinAssetMap(config, options.ballSkinAssets);
 
   function drawScene(state, resolveEntityPosition) {
@@ -125,6 +126,7 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
     drawParticles(state);
     drawLauncher(state);
     drawDangerGlow(state, resolveEntityPosition);
+    drawHeartConsumeEffect(state);
     if (showRoundBanner) {
       drawBanner(state);
     }
@@ -521,6 +523,15 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
     context.restore();
   }
 
+  function drawHeartShape(centerX, centerY, size, fill) {
+    context.beginPath();
+    context.moveTo(centerX, centerY + size * 0.56);
+    context.bezierCurveTo(centerX - size * 1.05, centerY - size * 0.05, centerX - size * 0.72, centerY - size * 0.78, centerX, centerY - size * 0.28);
+    context.bezierCurveTo(centerX + size * 0.72, centerY - size * 0.78, centerX + size * 1.05, centerY - size * 0.05, centerX, centerY + size * 0.56);
+    context.fillStyle = fill;
+    context.fill();
+  }
+
   function drawBalls(state) {
     for (const ball of state.balls) {
       // Only active balls should render in-flight; settled or queued balls are represented by the launcher.
@@ -563,11 +574,56 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
       context.beginPath();
       context.arc(particle.x, particle.y, 3, 0, Math.PI * 2);
       const alpha = particle.life / particle.maxLife;
-      context.fillStyle = particle.tone === "pickup" || particle.tone === "coin"
-        ? alphaColor("#ffcf8c", alpha)
-        : alphaColor("#a8efff", alpha);
+      context.fillStyle = particle.tone === "heart"
+        ? alphaColor("#ff6f8e", alpha)
+        : particle.tone === "pickup" || particle.tone === "coin"
+          ? alphaColor("#ffcf8c", alpha)
+          : alphaColor("#a8efff", alpha);
       context.fill();
     }
+  }
+
+  function drawHeartConsumeEffect(state) {
+    const effect = state.heartConsumeEffect;
+    if (!effect) {
+      return;
+    }
+
+    const progress = 1 - effect.life / effect.maxLife;
+    const alpha = Math.max(0, 1 - progress);
+    const iconScale = progress < 0.55
+      ? 1.35 - (progress / 0.55) * 0.45
+      : 0.9 + ((progress - 0.55) / 0.45) * 0.5;
+    const ringRadius = 44 + progress * 130;
+    const centerX = config.width / 2;
+    const centerY = config.height / 2;
+    const iconSize = 86 * iconScale;
+
+    context.save();
+    context.globalCompositeOperation = "screen";
+    context.strokeStyle = `rgba(255, 111, 142, ${0.75 * alpha})`;
+    context.lineWidth = 8 * alpha;
+    context.beginPath();
+    context.arc(centerX, centerY, ringRadius, 0, Math.PI * 2);
+    context.stroke();
+
+    const flash = context.createLinearGradient(0, state.arena.failLineY - 42, 0, state.arena.failLineY + 42);
+    flash.addColorStop(0, "rgba(255, 111, 142, 0)");
+    flash.addColorStop(0.5, `rgba(255, 111, 142, ${0.26 * alpha})`);
+    flash.addColorStop(1, "rgba(255, 111, 142, 0)");
+    context.fillStyle = flash;
+    context.fillRect(0, state.arena.failLineY - 42, config.width, 84);
+
+    context.globalCompositeOperation = "source-over";
+    context.globalAlpha = Math.min(1, alpha + 0.15);
+    context.shadowColor = "rgba(255, 111, 142, 0.78)";
+    context.shadowBlur = 22;
+    if (heartAsset.loaded && heartAsset.image) {
+      context.drawImage(heartAsset.image, centerX - iconSize / 2, centerY - iconSize / 2, iconSize, iconSize);
+    } else {
+      drawHeartShape(centerX, centerY, iconSize / 2, "#ff6f8e");
+    }
+    context.restore();
   }
 
   function drawLauncher(state) {

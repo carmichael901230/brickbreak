@@ -118,9 +118,27 @@ input {
   object-fit: contain;
 }
 
+.hud-resource-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.heart-counter img,
+.menu-hearts img {
+  filter: drop-shadow(0 0 7px rgba(255, 111, 142, 0.45));
+}
+
 .menu-coins {
   position: absolute;
   top: calc(14px + var(--safe-top));
+  right: 18px;
+}
+
+.menu-hearts {
+  position: absolute;
+  top: calc(52px + var(--safe-top));
   right: 18px;
 }
 
@@ -344,6 +362,19 @@ canvas {
   gap: 12px;
 }
 
+.heart-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.heart-action-button img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+
 #settingsOverlay .overlay-card {
   gap: 18px;
   padding: 28px 24px;
@@ -562,6 +593,87 @@ canvas {
   margin: 0 0 6px;
   text-align: center;
   color: var(--muted);
+}
+
+.check-in-card {
+  gap: 14px;
+}
+
+.check-in-reward-row {
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+  min-height: 38px;
+}
+
+.check-in-reward {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 900;
+}
+
+.check-in-reward img {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+}
+
+.check-in-days {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+
+.check-in-day {
+  min-height: 44px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.07);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.check-in-day.is-active {
+  color: #1d1d1d;
+  background: #f2b400;
+}
+
+.check-in-day.is-big {
+  border: 1px solid rgba(255, 209, 90, 0.72);
+}
+
+.check-in-fly-icon {
+  position: fixed;
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+  pointer-events: none;
+  z-index: 30;
+  filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.32));
+}
+
+.coin-counter.is-claim-pop {
+  animation: claim-counter-pop 240ms ease-out;
+}
+
+@keyframes claim-counter-pop {
+  0% {
+    transform: scale(1);
+    filter: none;
+  }
+
+  45% {
+    transform: scale(1.14);
+    filter: drop-shadow(0 0 12px rgba(250, 204, 21, 0.46));
+  }
+
+  100% {
+    transform: scale(1);
+    filter: none;
+  }
 }
 
 .sound-toggle {

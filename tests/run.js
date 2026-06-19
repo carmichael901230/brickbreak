@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import { createBoardGenerator } from "../src/board.js";
+import { resolveDailyCheckIn } from "../src/checkIn.js";
 import { GAME_CONFIG } from "../src/config.js";
 import { createGameController } from "../src/gameState.js";
 import { clampLaunchDirection, reflectBall, resolveBallBlockCollision } from "../src/physics.js";
@@ -124,6 +125,13 @@ test("board generator can spawn a coin without overlapping blocks or pickups", (
   assert.equal(generated.blocks.some((block) => block.column === generated.coins[0].column), false);
 });
 
+test("board generator does not create heart pickups", () => {
+  const generator = createBoardGenerator(GAME_CONFIG, 1234);
+  const generated = generator.generateRound(60, []);
+
+  assert.equal("hearts" in generated, false);
+});
+
 test("storage adapter falls back safely on corrupt settings", () => {
   const storage = createMemoryStorage({
     "arc-cascade-settings": "{bad"
@@ -144,6 +152,97 @@ test("storage adapter persists and loads coins", () => {
   const adapter = createStorageAdapter(storage);
   adapter.saveCoins(7);
   assert.equal(adapter.loadCoins(), 7);
+});
+
+test("storage adapter persists and loads hearts", () => {
+  const storage = createMemoryStorage();
+  const adapter = createStorageAdapter(storage);
+  adapter.saveHearts(3);
+  assert.equal(adapter.loadHearts(), 3);
+});
+
+test("storage adapter persists and loads daily check-in state", () => {
+  const storage = createMemoryStorage();
+  const adapter = createStorageAdapter(storage);
+  const checkIn = {
+    lastCheckInDate: "2026-06-17",
+    checkInStreak: 4,
+    lastRewardDay: 4
+  };
+
+  adapter.saveDailyCheckIn(checkIn);
+  assert.deepEqual(adapter.loadDailyCheckIn(), checkIn);
+});
+
+test("storage adapter falls back safely on corrupt daily check-in state", () => {
+  const storage = createMemoryStorage({
+    "arc-cascade-daily-check-in": "{bad"
+  });
+  const adapter = createStorageAdapter(storage);
+
+  assert.deepEqual(adapter.loadDailyCheckIn(), {
+    lastCheckInDate: null,
+    checkInStreak: 0,
+    lastRewardDay: 0
+  });
+});
+
+test("daily check-in grants day one on first login", () => {
+  const result = resolveDailyCheckIn({}, "2026-06-17");
+
+  assert.equal(result.claimed, true);
+  assert.equal(result.reward.day, 1);
+  assert.deepEqual(result.reward, { day: 1, coins: 10, hearts: 0 });
+  assert.equal(result.state.lastCheckInDate, "2026-06-17");
+});
+
+test("daily check-in does not grant twice on the same day", () => {
+  const result = resolveDailyCheckIn({
+    lastCheckInDate: "2026-06-17",
+    checkInStreak: 2,
+    lastRewardDay: 2
+  }, "2026-06-17");
+
+  assert.equal(result.claimed, false);
+  assert.equal(result.alreadyClaimed, true);
+});
+
+test("daily check-in continues from yesterday", () => {
+  const result = resolveDailyCheckIn({
+    lastCheckInDate: "2026-06-16",
+    checkInStreak: 2,
+    lastRewardDay: 2
+  }, "2026-06-17");
+
+  assert.equal(result.claimed, true);
+  assert.equal(result.chainBroken, false);
+  assert.equal(result.reward.day, 3);
+  assert.equal(result.reward.hearts, 1);
+});
+
+test("daily check-in resets after a missed day", () => {
+  const result = resolveDailyCheckIn({
+    lastCheckInDate: "2026-06-15",
+    checkInStreak: 5,
+    lastRewardDay: 5
+  }, "2026-06-17");
+
+  assert.equal(result.claimed, true);
+  assert.equal(result.chainBroken, true);
+  assert.equal(result.reward.day, 1);
+});
+
+test("daily check-in grants the day seven big reward", () => {
+  const result = resolveDailyCheckIn({
+    lastCheckInDate: "2026-06-16",
+    checkInStreak: 6,
+    lastRewardDay: 6
+  }, "2026-06-17");
+
+  assert.equal(result.reward.day, 7);
+  assert.equal(result.reward.coins, 100);
+  assert.equal(result.reward.hearts, 1);
+  assert.equal(result.reward.big, true);
 });
 
 test("storage adapter persists and loads skin ownership", () => {
@@ -213,6 +312,95 @@ test("coins are collected on contact and emit a coin event", () => {
   assert.equal(game.getState().coins, 1);
   assert.equal(game.getState().coinsOnBoard[0].collected, true);
   assert.equal(audioBus.events.some((event) => event.type === "coin"), true);
+});
+
+test("heart count is persistent and restart preserves it", () => {
+  const game = createGameController({
+    initialHearts: 3,
+    boardGenerator: createRoundSequence([
+      { blocks: [], pickups: [] },
+      { blocks: [], pickups: [] }
+    ]),
+    audioBus: createSilentAudioBus()
+  });
+
+  game.restart();
+
+  assert.equal(game.getState().heartCount, 3);
+});
+
+test("snapshot leaves held hearts as a persistent wallet balance", () => {
+  const game = createGameController({
+    initialHearts: 0,
+    boardGenerator: createRoundSequence([
+      { blocks: [], pickups: [] },
+      { blocks: [], pickups: [] }
+    ]),
+    audioBus: createSilentAudioBus()
+  });
+
+  const snapshot = game.exportSnapshot();
+  assert.equal(Object.hasOwn(snapshot, "heartCount"), false);
+
+  const staleSnapshot = {
+    ...snapshot,
+    heartCount: 0
+  };
+  const restored = createGameController({
+    initialHearts: 1,
+    boardGenerator: createRoundSequence([{ blocks: [], pickups: [] }]),
+    audioBus: createSilentAudioBus()
+  });
+
+  assert.equal(restored.importSnapshot(staleSnapshot), true);
+  assert.equal(restored.getState().heartCount, 1);
+});
+
+test("consumeHeartContinue spends one heart and resumes from gameover", () => {
+  const game = createGameController({
+    boardGenerator: createRoundSequence([
+      { blocks: [], pickups: [] },
+      { blocks: [], pickups: [] }
+    ]),
+    audioBus: createSilentAudioBus()
+  });
+
+  const state = game.getState();
+  state.heartCount = 2;
+  state.round = 6;
+  state.score = 5;
+  state.ballsOwned = 3;
+  state.state = "gameover";
+  state.gameOver = true;
+  state.blocks = [
+    { id: "safe", row: 2, column: 0, hp: 2 },
+    { id: "failed", row: 7, column: 1, hp: 4 }
+  ];
+
+  assert.equal(game.consumeHeartContinue(), true);
+
+  const continued = game.getState();
+  assert.equal(continued.heartCount, 1);
+  assert.equal(continued.state, "aiming");
+  assert.equal(continued.gameOver, false);
+  assert.deepEqual(continued.blocks.map((block) => block.id), ["safe"]);
+  assert.ok(continued.heartConsumeEffect);
+});
+
+test("consumeHeartContinue is ignored without a held heart", () => {
+  const game = createGameController({
+    boardGenerator: createRoundSequence([
+      { blocks: [], pickups: [] },
+      { blocks: [], pickups: [] }
+    ]),
+    audioBus: createSilentAudioBus()
+  });
+
+  game.getState().state = "gameover";
+  game.getState().gameOver = true;
+
+  assert.equal(game.consumeHeartContinue(), false);
+  assert.equal(game.getState().state, "gameover");
 });
 
 test("continueFromGameOver returns the game to aiming and removes fail-line blocks", () => {

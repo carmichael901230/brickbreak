@@ -1,6 +1,7 @@
 import { createAudioBus } from "./audio.js";
 import { createBoardGenerator } from "./board.js";
 import { GAME_CONFIG } from "./config.js";
+import { DAILY_CHECK_IN_REWARDS, formatLocalDate, resolveDailyCheckIn } from "./checkIn.js";
 import { createGameController } from "./gameState.js";
 import { createInputController } from "./input.js";
 import { createRenderer } from "./render.js";
@@ -17,13 +18,19 @@ const pauseButton = document.querySelector("#pauseButton");
 const roundValue = document.querySelector("#roundValue");
 const bestValue = document.querySelector("#bestValue");
 const coinValue = document.querySelector("#coinValue");
+const heartCounter = document.querySelector("#heartCounter");
+const heartValue = document.querySelector("#heartValue");
 const menuCoinValue = document.querySelector("#menuCoinValue");
+const menuHeartCounter = document.querySelector("#menuHeartCounter");
+const menuHeartValue = document.querySelector("#menuHeartValue");
 const statusText = document.querySelector("#statusText");
 const soundToggle = document.querySelector("#soundToggle");
 const speedButton = document.querySelector("#speedButton");
 const pauseOverlay = document.querySelector("#pauseOverlay");
 const settingsOverlay = document.querySelector("#settingsOverlay");
 const gameOverOverlay = document.querySelector("#gameOverOverlay");
+const heartContinueOverlay = document.querySelector("#heartContinueOverlay");
+const checkInOverlay = document.querySelector("#checkInOverlay");
 const shopOverlay = document.querySelector("#shopOverlay");
 const resumeButton = document.querySelector("#resumeButton");
 const backToMenuButton = document.querySelector("#backToMenuButton");
@@ -32,6 +39,13 @@ const closeSettingsButton = document.querySelector("#closeSettingsButton");
 const restartRunButton = document.querySelector("#restartRunButton");
 const gameOverMenuButton = document.querySelector("#gameOverMenuButton");
 const gameOverSummary = document.querySelector("#gameOverSummary");
+const useHeartButton = document.querySelector("#useHeartButton");
+const declineHeartButton = document.querySelector("#declineHeartButton");
+const claimCheckInButton = document.querySelector("#claimCheckInButton");
+const checkInStreakText = document.querySelector("#checkInStreakText");
+const checkInRewardRow = document.querySelector("#checkInRewardRow");
+const checkInDays = document.querySelector("#checkInDays");
+const checkInResetText = document.querySelector("#checkInResetText");
 const closeShopButton = document.querySelector("#closeShopButton");
 const shopGrid = document.querySelector("#shopGrid");
 const shopBanner = document.querySelector("#shopBanner");
@@ -58,6 +72,7 @@ const boardGenerator = createBoardGenerator(GAME_CONFIG);
 const game = createGameController({
   config: GAME_CONFIG,
   initialCoins: storage.loadCoins(),
+  initialHearts: storage.loadHearts(),
   initialSkins: storage.loadSkins(),
   boardGenerator,
   audioBus
@@ -69,6 +84,8 @@ let hasStartedRun = false;
 let shopCategory = "brick";
 let pendingPurchase = null;
 let shopBannerTimer = null;
+let pendingCheckIn = null;
+let checkInClaimAnimating = false;
 
 function setStatus(message) {
   statusText.textContent = message;
@@ -111,6 +128,8 @@ function syncScreenState() {
   toggleElement(settingsOverlay, overlayScreen === "settings");
   toggleElement(shopOverlay, overlayScreen === "shop");
   toggleElement(gameOverOverlay, overlayScreen === "gameover");
+  toggleElement(heartContinueOverlay, overlayScreen === "heart-continue");
+  toggleElement(checkInOverlay, overlayScreen === "daily-checkin");
   syncResponsiveLayout();
 }
 
@@ -133,6 +152,10 @@ function syncHud() {
   bestValue.textContent = String(Math.max(storage.loadBestScore(), state.bestScore, state.score));
   coinValue.textContent = String(state.coins);
   menuCoinValue.textContent = String(state.coins);
+  heartValue.textContent = String(state.heartCount);
+  menuHeartValue.textContent = String(state.heartCount);
+  heartCounter.classList.toggle("is-hidden", appScreen !== "game");
+  menuHeartCounter.classList.toggle("is-hidden", appScreen !== "menu");
   speedButton.classList.toggle("is-hidden", !state.speedUpAvailable || isSimulationPaused());
   gameOverSummary.textContent = `You made it to round ${state.round}.`;
 }
@@ -143,6 +166,142 @@ function syncCoins() {
   if (state.coins !== storedCoins) {
     storage.saveCoins(state.coins);
   }
+}
+
+function syncHearts() {
+  const state = game.getState();
+  const storedHearts = storage.loadHearts();
+  if (state.heartCount !== storedHearts) {
+    storage.saveHearts(state.heartCount);
+  }
+}
+
+function renderCheckIn(result) {
+  if (!result?.reward) {
+    return;
+  }
+
+  checkInStreakText.textContent = `连续签到 ${result.reward.day} 天`;
+  checkInRewardRow.innerHTML = "";
+  checkInRewardRow.hidden = true;
+  checkInDays.innerHTML = "";
+  for (const reward of DAILY_CHECK_IN_REWARDS) {
+    const day = document.createElement("span");
+    day.className = "check-in-day";
+    day.classList.toggle("is-active", reward.day === result.reward.day);
+    day.classList.toggle("is-big", reward.big === true);
+    day.textContent = `第${reward.day}天`;
+    checkInDays.append(day);
+  }
+  checkInResetText.textContent = result.chainBroken
+    ? "连续签到中断，从第 1 天开始。每天登录可保持连续奖励。"
+    : "每天登录可保持连续奖励，中断一天将从第 1 天重新开始。";
+}
+
+function claimDailyCheckIn() {
+  const result = resolveDailyCheckIn(storage.loadDailyCheckIn(), formatLocalDate());
+  if (!result.claimed) {
+    return;
+  }
+
+  pendingCheckIn = result;
+  renderCheckIn(result);
+  overlayScreen = "daily-checkin";
+  syncScreenState();
+}
+
+function visibleResourceCounter(type) {
+  const inGame = appScreen === "game";
+  if (type === "coin") {
+    return inGame ? coinValue.closest(".coin-counter") : menuCoinValue.closest(".coin-counter");
+  }
+
+  return inGame ? heartCounter : menuHeartCounter;
+}
+
+function animateBrowserCheckInReward(result) {
+  const activeDay = checkInDays.querySelector(".check-in-day.is-active");
+  const sourceRect = activeDay?.getBoundingClientRect() ?? checkInOverlay.getBoundingClientRect();
+  const sourceX = sourceRect.left + sourceRect.width / 2;
+  const sourceY = sourceRect.top + sourceRect.height / 2;
+  const rewards = [
+    { type: "coin", icon: "./src/assets/pic/dollar.png", amount: result.reward.coins },
+    { type: "heart", icon: "./src/assets/pic/heart.png", amount: result.reward.hearts }
+  ].filter((reward) => reward.amount > 0);
+
+  if (rewards.length === 0) {
+    return Promise.resolve();
+  }
+
+  return Promise.all(rewards.map((reward, index) => new Promise((resolve) => {
+    const target = visibleResourceCounter(reward.type);
+    const targetRect = target.getBoundingClientRect();
+    const coinTargetRect = visibleResourceCounter("coin").getBoundingClientRect();
+    const icon = document.createElement("img");
+    icon.className = "check-in-fly-icon";
+    icon.src = reward.icon;
+    icon.alt = "";
+    icon.style.left = `${sourceX - 17}px`;
+    icon.style.top = `${sourceY - 17}px`;
+    document.body.append(icon);
+
+    const endX = targetRect.width > 0
+      ? targetRect.left + targetRect.width / 2
+      : coinTargetRect.left + coinTargetRect.width / 2;
+    const endY = targetRect.height > 0
+      ? targetRect.top + targetRect.height / 2
+      : coinTargetRect.top + coinTargetRect.height / 2 + 38;
+    if (typeof icon.animate !== "function") {
+      setTimeout(() => {
+        target.classList.add("is-claim-pop");
+        setTimeout(() => target.classList.remove("is-claim-pop"), 240);
+        icon.remove();
+        resolve();
+      }, 760 + index * 90);
+      return;
+    }
+
+    const animation = icon.animate([
+      { transform: "translate(0, 0) scale(1.25)", opacity: 1 },
+      { transform: `translate(${(endX - sourceX) * 0.5}px, ${endY - sourceY - 46}px) scale(1)`, opacity: 0.95 },
+      { transform: `translate(${endX - sourceX}px, ${endY - sourceY}px) scale(0.72)`, opacity: 0.2 }
+    ], {
+      duration: 760,
+      delay: index * 90,
+      easing: "cubic-bezier(0.2, 0.8, 0.2, 1)",
+      fill: "forwards"
+    });
+
+    animation.addEventListener("finish", () => {
+      target.classList.add("is-claim-pop");
+      setTimeout(() => target.classList.remove("is-claim-pop"), 240);
+      icon.remove();
+      resolve();
+    }, { once: true });
+  })));
+}
+
+function collectDailyCheckInReward() {
+  if (!pendingCheckIn || checkInClaimAnimating) {
+    return;
+  }
+
+  checkInClaimAnimating = true;
+  claimCheckInButton.disabled = true;
+  const result = pendingCheckIn;
+
+  animateBrowserCheckInReward(result).finally(() => {
+    storage.saveDailyCheckIn(result.state);
+    game.grantRewards(result.reward);
+    storage.saveCoins(game.getState().coins);
+    storage.saveHearts(game.getState().heartCount);
+    pendingCheckIn = null;
+    checkInClaimAnimating = false;
+    claimCheckInButton.disabled = false;
+    overlayScreen = null;
+    syncScreenState();
+    syncHud();
+  });
 }
 
 function syncSkins() {
@@ -282,7 +441,9 @@ function handleSkinTap(skinId) {
 function handleStatusMessages() {
   const state = game.getState();
   if (state.state === "gameover") {
-    setStatus(`Run over at round ${state.round}. Press restart and chase ${Math.max(state.bestScore, state.score)}.`);
+    setStatus(state.heartConsumeEffect
+      ? "Heart used. One more chance."
+      : `Run over at round ${state.round}. Press restart and chase ${Math.max(state.bestScore, state.score)}.`);
     return;
   }
 
@@ -369,6 +530,26 @@ closeShopButton.addEventListener("click", () => {
   syncScreenState();
 });
 
+useHeartButton.addEventListener("click", () => {
+  if (game.consumeHeartContinue()) {
+    storage.saveHearts(game.getState().heartCount);
+    overlayScreen = null;
+    hasStartedRun = true;
+    syncScreenState();
+    syncHud();
+    setStatus("Heart used. One more chance.");
+  }
+});
+
+declineHeartButton.addEventListener("click", () => {
+  overlayScreen = "gameover";
+  syncScreenState();
+});
+
+claimCheckInButton.addEventListener("click", () => {
+  collectDailyCheckInReward();
+});
+
 brickShopTab.addEventListener("click", () => setShopCategory("brick"));
 ballShopTab.addEventListener("click", () => setShopCategory("ball"));
 shopGrid.addEventListener("click", (event) => {
@@ -409,11 +590,17 @@ function frame(now) {
   }
   refreshBestScore();
   syncCoins();
+  syncHearts();
   syncHud();
   if (appScreen === "game") {
     if (game.getState().state === "gameover" && overlayScreen !== "gameover") {
-      overlayScreen = "gameover";
-      syncScreenState();
+      if (game.getState().heartCount > 0 && overlayScreen !== "heart-continue") {
+        overlayScreen = "heart-continue";
+        syncScreenState();
+      } else {
+        overlayScreen = "gameover";
+        syncScreenState();
+      }
     }
     handleStatusMessages();
     renderer.render(game.getState(), game.getEntityPosition);
@@ -424,4 +611,5 @@ function frame(now) {
 syncScreenState();
 syncHud();
 syncResponsiveLayout();
+claimDailyCheckIn();
 requestAnimationFrame(frame);

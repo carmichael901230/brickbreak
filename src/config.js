@@ -210,7 +210,9 @@ export const GAME_CONFIG = {
 export const STORAGE_KEYS = {
   bestScore: "arc-cascade-best-score",
   coins: "arc-cascade-coins",
+  hearts: "arc-cascade-hearts",
   skins: "arc-cascade-skins",
   settings: "arc-cascade-settings",
-  gameProgress: "arc-cascade-game-progress"
+  gameProgress: "arc-cascade-game-progress",
+  dailyCheckIn: "arc-cascade-daily-check-in"
 };

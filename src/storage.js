@@ -41,6 +41,16 @@ function normalizeSkins(skins) {
   };
 }
 
+function normalizeCheckIn(value) {
+  const checkInStreak = Math.max(0, Math.min(7, Math.floor(Number(value?.checkInStreak) || 0)));
+  const lastRewardDay = Math.max(0, Math.min(7, Math.floor(Number(value?.lastRewardDay) || 0)));
+  return {
+    lastCheckInDate: typeof value?.lastCheckInDate === "string" ? value.lastCheckInDate : null,
+    checkInStreak,
+    lastRewardDay
+  };
+}
+
 export function createStorageAdapter(storage = globalThis.localStorage) {
   return {
     loadSettings() {
@@ -94,6 +104,23 @@ export function createStorageAdapter(storage = globalThis.localStorage) {
       storage.setItem(STORAGE_KEYS.coins, String(Math.max(0, Math.floor(coins))));
     },
 
+    loadHearts() {
+      if (!storage) {
+        return 0;
+      }
+
+      const value = Number(storage.getItem(STORAGE_KEYS.hearts));
+      return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+    },
+
+    saveHearts(hearts) {
+      if (!storage) {
+        return;
+      }
+
+      storage.setItem(STORAGE_KEYS.hearts, String(Math.max(0, Math.floor(hearts))));
+    },
+
     loadSkins() {
       if (!storage) {
         return normalizeSkins(defaultSkins);
@@ -124,6 +151,22 @@ export function createStorageAdapter(storage = globalThis.localStorage) {
       }
 
       storage.setItem(STORAGE_KEYS.gameProgress, JSON.stringify(progress));
+    },
+
+    loadDailyCheckIn() {
+      if (!storage) {
+        return normalizeCheckIn(null);
+      }
+
+      return normalizeCheckIn(safeParse(storage.getItem(STORAGE_KEYS.dailyCheckIn), null));
+    },
+
+    saveDailyCheckIn(checkIn) {
+      if (!storage) {
+        return;
+      }
+
+      storage.setItem(STORAGE_KEYS.dailyCheckIn, JSON.stringify(normalizeCheckIn(checkIn)));
     },
 
     clearGameProgress() {

@@ -1,5 +1,6 @@
 import { createAudioBus } from "./audio.js";
 import { createBoardGenerator } from "./board.js";
+import { DAILY_CHECK_IN_REWARDS, formatLocalDate, resolveDailyCheckIn } from "./checkIn.js";
 import { GAME_CONFIG } from "./config.js";
 import { createGameController } from "./gameState.js";
 import { createRenderer } from "./render.js";
@@ -37,6 +38,16 @@ const texts = {
   shareContinueHintOne: "球球还没放弃！",
   shareContinueHintTwo: "分享到微信群立即复活 +1",
   shareContinueHintThree: "继续冲击更高分!",
+  useHeartTitle: "使用爱心复活？",
+  useHeartHint: "消耗 1 个爱心，继续挑战本局。",
+  useHeart: "立即复活",
+  noThanks: "放弃",
+  dailyCheckIn: "每日签到",
+  dailyStreak: (day) => `连续签到 ${day} 天`,
+  dailyKeepGoing: "连续登录领大奖, 中断将从第 1 天重新开始",
+  dailyResetHint: "",
+  dailyReset: "连续签到中断，从第 1 天开始",
+  claim: "领取",
   newRecord: "新纪录",
   brokePreviousRecord: (level) => `你已突破之前的第 ${level} 关纪录`,
   currentPlay: "本局到达",
@@ -46,8 +57,36 @@ const texts = {
   speed: "加速"
 };
 
+const HEART_CONTINUE_PANEL_Y_SCALE = 0.23;
+const HEART_CONTINUE_PANEL_MIN_HEIGHT = 230;
+const HEART_CONTINUE_PANEL_MAX_HEIGHT = 252;
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function heartContinuePanelRect(rect) {
+  const panelSideInset = 24;
+  const panelHeight = clamp(
+    rect.height * 0.5,
+    HEART_CONTINUE_PANEL_MIN_HEIGHT,
+    HEART_CONTINUE_PANEL_MAX_HEIGHT
+  );
+  return {
+    x: rect.x + panelSideInset,
+    y: rect.y + rect.height * HEART_CONTINUE_PANEL_Y_SCALE,
+    width: rect.width - panelSideInset * 2,
+    height: panelHeight
+  };
+}
+
+function lerp(start, end, amount) {
+  return start + (end - start) * amount;
+}
+
+function easeOutCubic(amount) {
+  const inverted = 1 - amount;
+  return 1 - inverted * inverted * inverted;
 }
 
 function roundedRect(context, x, y, width, height, radius) {
@@ -207,6 +246,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   const tutorialAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/tap.png");
   const settingsIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/settings.png");
   const coinIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/dollar.png");
+  const heartIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/heart.png");
   const speedIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/fast-forward.png");
   const trophyIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/trophy.png");
   const confettiIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/confetti.png");
@@ -227,6 +267,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     pixelRatio,
     showRoundBanner: false,
     coinAsset: coinIconAsset,
+    heartAsset: heartIconAsset,
     ballSkinAssets
   });
   renderer.context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
@@ -247,6 +288,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   const game = createGameController({
     config: GAME_CONFIG,
     initialCoins: storage.loadCoins(),
+    initialHearts: storage.loadHearts(),
     initialSkins: storage.loadSkins(),
     boardGenerator,
     audioBus
@@ -279,6 +321,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let newRecordCheerPlayed = false;
   let recordConfetti = null;
   let lastSavedCoins = storage.loadCoins();
+  let lastSavedHearts = storage.loadHearts();
   let lastSavedSkinsJson = JSON.stringify(storage.loadSkins());
   let shopCategory = "brick";
   let pendingPurchase = null;
@@ -288,6 +331,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let shopDragStartY = 0;
   let shopDragStartScrollY = 0;
   let shopDragging = false;
+  let pendingCheckIn = null;
+  let dailyClaimAnimation = null;
 
   const scheduleFrame =
     globalThis.requestAnimationFrame?.bind(globalThis) ||
@@ -349,12 +394,51 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
   }
 
+  function syncHearts() {
+    const hearts = game.getState().heartCount;
+    if (hearts !== lastSavedHearts) {
+      storage.saveHearts(hearts);
+      lastSavedHearts = hearts;
+    }
+  }
+
   function syncSkins() {
     const skinsJson = JSON.stringify(game.getState().skins);
     if (skinsJson !== lastSavedSkinsJson) {
       storage.saveSkins(game.getState().skins);
       lastSavedSkinsJson = skinsJson;
     }
+  }
+
+  function claimDailyCheckIn() {
+    if (pendingCheckIn) {
+      return;
+    }
+
+    const result = resolveDailyCheckIn(storage.loadDailyCheckIn(), formatLocalDate());
+    if (!result.claimed) {
+      return;
+    }
+
+    pendingCheckIn = result;
+    overlay = "daily-checkin";
+  }
+
+  function collectDailyCheckInReward() {
+    if (dailyClaimAnimation) {
+      return;
+    }
+
+    if (!pendingCheckIn) {
+      overlay = null;
+      return;
+    }
+
+    dailyClaimAnimation = {
+      reward: pendingCheckIn.reward,
+      startedAt: Date.now(),
+      duration: 900
+    };
   }
 
   function buildProgressPayload() {
@@ -615,6 +699,40 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     persistProgress(true);
   }
 
+  function showFinalGameOver() {
+    continueUsedThisRun = true;
+    hasStartedRun = false;
+    clearSavedProgress();
+    overlay = "gameover";
+  }
+
+  function gameOverRecoveryOverlay(finalState) {
+    if (!continueUsedThisRun) {
+      return "gameover";
+    }
+
+    return finalState.heartCount > 0 ? "heart-continue" : "gameover";
+  }
+
+  function useHeartToContinue() {
+    if (!game.consumeHeartContinue()) {
+      return;
+    }
+
+    storage.saveHearts(game.getState().heartCount);
+    lastSavedHearts = game.getState().heartCount;
+    screen = "game";
+    overlay = null;
+    hasStartedRun = true;
+    pointerActive = false;
+    gameOverResult = null;
+    newRecordCheerPlayed = false;
+    resetRecordConfetti();
+    tutorialIdleTime = 0;
+    tutorialDismissed = true;
+    persistProgress(true);
+  }
+
   function openShop() {
     overlay = "shop";
     shopCategory = "brick";
@@ -731,6 +849,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       width: rect.width - 48,
       height: rect.height * gameOverPanelHeightScale
     };
+    const heartPanel = heartContinuePanelRect(rect);
+    const checkInPanel = checkInPanelRect(rect);
     const pausePanel = {
       x: rect.x + 24,
       y: rect.y + rect.height * 0.16,
@@ -739,7 +859,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     };
 
     if (screen === "menu") {
-      const buttons = overlay === "shop" || overlay === "settings" || overlay === "confirm-new-run"
+      const buttons = overlay === "shop" || overlay === "settings" || overlay === "confirm-new-run" || overlay === "daily-checkin"
         ? []
         : [
             {
@@ -775,6 +895,20 @@ export function bootMiniGame(wxApi = globalThis.wx) {
             height: 52
           }
         );
+        return buttons;
+      }
+
+      if (overlay === "daily-checkin") {
+        if (dailyClaimAnimation) {
+          return buttons;
+        }
+        buttons.push({
+          id: "daily-checkin-ok",
+          x: checkInPanel.x + 36,
+          y: checkInPanel.y + checkInPanel.height - 74,
+          width: checkInPanel.width - 72,
+          height: 52
+        });
         return buttons;
       }
 
@@ -843,6 +977,40 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       }
 
       return buttons;
+    }
+
+    if (overlay === "daily-checkin") {
+      if (dailyClaimAnimation) {
+        return [];
+      }
+      return [
+        {
+          id: "daily-checkin-ok",
+          x: checkInPanel.x + 36,
+          y: checkInPanel.y + checkInPanel.height - 74,
+          width: checkInPanel.width - 72,
+          height: 52
+        }
+      ];
+    }
+
+    if (overlay === "heart-continue") {
+      return [
+        {
+          id: "heart-use",
+          x: heartPanel.x + 24,
+          y: heartPanel.y + heartPanel.height - 124,
+          width: heartPanel.width - 48,
+          height: 52
+        },
+        {
+          id: "heart-decline",
+          x: heartPanel.x + 24,
+          y: heartPanel.y + heartPanel.height - 62,
+          width: heartPanel.width - 48,
+          height: 52
+        }
+      ];
     }
 
     const buttons = [
@@ -961,9 +1129,18 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       case "share-continue":
         shareToContinue();
         break;
+      case "heart-use":
+        useHeartToContinue();
+        break;
+      case "heart-decline":
+        showFinalGameOver();
+        break;
+      case "daily-checkin-ok":
+        collectDailyCheckInReward();
+        break;
       case "gameover-close":
         if (!continueUsedThisRun) {
-          continueUsedThisRun = true;
+          showFinalGameOver();
           break;
         }
         goToMenu();
@@ -1044,6 +1221,26 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       const contentX = button.x + (button.width - iconSize - gap - textWidth) / 2;
       const centerY = button.y + button.height / 2;
       context.drawImage(speedIconAsset.image, contentX, centerY - iconSize / 2, iconSize, iconSize);
+      context.textAlign = "left";
+      context.fillText(label, contentX + iconSize + gap, centerY + 1);
+      return;
+    }
+
+    if (button.id === "heart-use") {
+      const iconSize = 24;
+      const gap = 8;
+      const textWidth = context.measureText(label).width;
+      const contentX = button.x + (button.width - iconSize - gap - textWidth) / 2;
+      const centerY = button.y + button.height / 2;
+      if (heartIconAsset.loaded && heartIconAsset.image) {
+        context.drawImage(heartIconAsset.image, contentX, centerY - iconSize / 2, iconSize, iconSize);
+      } else {
+        context.beginPath();
+        context.arc(contentX + iconSize / 2, centerY, iconSize / 2, 0, Math.PI * 2);
+        context.fillStyle = "#ff6f8e";
+        context.fill();
+        context.fillStyle = usesDarkButtonText ? "#1d1d1d" : "#fbfbfb";
+      }
       context.textAlign = "left";
       context.fillText(label, contentX + iconSize + gap, centerY + 1);
       return;
@@ -1399,6 +1596,334 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     context.restore();
   }
 
+  function drawHeartCounter(context, x, y, hearts, align = "right") {
+    const iconSize = 32;
+    const text = String(hearts);
+    context.save();
+    context.font = "800 26px sans-serif";
+    const textWidth = context.measureText(text).width;
+    const totalWidth = iconSize + 6 + textWidth;
+    const startX = align === "right" ? x - totalWidth : x;
+
+    if (heartIconAsset.loaded && heartIconAsset.image) {
+      context.drawImage(heartIconAsset.image, startX, y - iconSize / 2, iconSize, iconSize);
+    } else {
+      context.beginPath();
+      context.arc(startX + iconSize / 2, y, iconSize / 2, 0, Math.PI * 2);
+      context.fillStyle = "#ff6f8e";
+      context.fill();
+      context.fillStyle = "#fbfbfb";
+      context.font = "800 18px sans-serif";
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText("+", startX + iconSize / 2, y + 1);
+      context.font = "800 26px sans-serif";
+    }
+
+    context.fillStyle = "#fbfbfb";
+    context.textAlign = "left";
+    context.textBaseline = "middle";
+    context.fillText(text, startX + iconSize + 6, y + 1);
+    context.restore();
+  }
+
+  function drawTopRightResourceCounters(context, rect, state) {
+    drawCoinCounter(context, screenWidth - rect.horizontalPadding, rect.topInset + 40, state.coins);
+    drawHeartCounter(context, screenWidth - rect.horizontalPadding, rect.topInset + 78, state.heartCount);
+  }
+
+  function drawCheckInRewardItem(context, item, x, y, options = {}) {
+    if (!item || item.amount <= 0) {
+      return;
+    }
+
+    const iconSize = options.iconSize ?? 16;
+    const fontSize = options.fontSize ?? 13;
+    const gap = options.gap ?? 3;
+    const text = String(item.amount);
+    context.save();
+    context.font = `900 ${fontSize}px sans-serif`;
+    const textWidth = context.measureText(text).width;
+    const totalWidth = iconSize + gap + textWidth;
+    const startX = x - totalWidth / 2;
+
+    if (item.asset.loaded && item.asset.image) {
+      context.drawImage(item.asset.image, startX, y - iconSize / 2, iconSize, iconSize);
+    } else {
+      context.beginPath();
+      context.arc(startX + iconSize / 2, y, iconSize / 2, 0, Math.PI * 2);
+      context.fillStyle = item.color;
+      context.fill();
+      context.fillStyle = item.fallbackColor;
+      context.font = `900 ${Math.max(10, fontSize - 2)}px sans-serif`;
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText(item.fallback, startX + iconSize / 2, y + 1);
+      context.font = `900 ${fontSize}px sans-serif`;
+    }
+
+    context.fillStyle = options.textColor ?? "#fbfbfb";
+    context.textAlign = "left";
+    context.textBaseline = "middle";
+    context.fillText(text, startX + iconSize + gap, y + 1);
+    context.restore();
+  }
+
+  function drawRewardIcon(context, item, centerX, centerY, size, alpha = 1) {
+    context.save();
+    context.globalAlpha = alpha;
+    if (item.asset.loaded && item.asset.image) {
+      context.drawImage(item.asset.image, centerX - size / 2, centerY - size / 2, size, size);
+    } else {
+      context.beginPath();
+      context.arc(centerX, centerY, size / 2, 0, Math.PI * 2);
+      context.fillStyle = item.color;
+      context.fill();
+      context.fillStyle = item.fallbackColor;
+      context.font = `900 ${Math.max(12, size * 0.5)}px sans-serif`;
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText(item.fallback, centerX, centerY + 1);
+    }
+    context.restore();
+  }
+
+  function checkInRewardItems(reward) {
+    return [
+      {
+        type: "coin",
+        asset: coinIconAsset,
+        fallback: "$",
+        color: "#f2b400",
+        fallbackColor: "#1d1d1d",
+        amount: reward?.coins ?? 0
+      },
+      {
+        type: "heart",
+        asset: heartIconAsset,
+        fallback: "+",
+        color: "#ff6f8e",
+        fallbackColor: "#fbfbfb",
+        amount: reward?.hearts ?? 0
+      }
+    ].filter((item) => item.amount > 0);
+  }
+
+  function checkInPanelRect(rect) {
+    const panelSideInset = 18;
+    return {
+      x: rect.x + panelSideInset,
+      y: rect.y + rect.height * 0.04,
+      width: rect.width - panelSideInset * 2,
+      height: rect.height * 0.9
+    };
+  }
+
+  function checkInRewardCardLayout(panel, day) {
+    const gridTop = panel.y + 122;
+    const cardGap = 10;
+    const cardHeight = 66;
+    const gridInset = 24;
+    const index = day - 1;
+    const isTopRow = index < 4;
+    const rowIndex = isTopRow ? index : index - 4;
+    const topCardWidth = (panel.width - gridInset * 2 - cardGap * 3) / 4;
+    const bottomCardWidth = (panel.width - gridInset * 2 - cardGap * 2) / 3;
+    const cardWidth = isTopRow ? topCardWidth : bottomCardWidth;
+    const rowWidth = isTopRow
+      ? topCardWidth * 4 + cardGap * 3
+      : bottomCardWidth * 3 + cardGap * 2;
+
+    return {
+      x: panel.x + (panel.width - rowWidth) / 2 + rowIndex * (cardWidth + cardGap),
+      y: gridTop + (isTopRow ? 0 : cardHeight + cardGap),
+      width: cardWidth,
+      height: cardHeight
+    };
+  }
+
+  function drawCheckInDayCard(context, card, dayReward, active, claimed) {
+    const isBigReward = Boolean(dayReward.big);
+    const radius = 10;
+    roundedRect(context, card.x, card.y, card.width, card.height, radius);
+    context.fillStyle = active
+      ? "#f2b400"
+      : claimed
+        ? "rgba(34,197,94,0.22)"
+        : "rgba(255,255,255,0.08)";
+    context.fill();
+    context.strokeStyle = active
+      ? "rgba(255,255,255,0.4)"
+      : claimed
+        ? "rgba(74,222,128,0.62)"
+        : isBigReward
+          ? "rgba(255,209,90,0.9)"
+          : "rgba(255,255,255,0.12)";
+    context.lineWidth = active || isBigReward ? 2 : 1;
+    context.stroke();
+
+    if (isBigReward && !claimed && !active) {
+      context.save();
+      context.shadowColor = "rgba(250,204,21,0.55)";
+      context.shadowBlur = 12;
+      roundedRect(context, card.x + 2, card.y + 2, card.width - 4, card.height - 4, radius - 2);
+      context.strokeStyle = "rgba(250,204,21,0.45)";
+      context.lineWidth = 1;
+      context.stroke();
+      context.restore();
+    }
+
+    const labelColor = active ? "#1d1d1d" : claimed ? "#bbf7d0" : "rgba(255,255,255,0.82)";
+    context.fillStyle = labelColor;
+    context.font = "900 13px sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(`第${dayReward.day}天`, card.x + card.width / 2, card.y + 15);
+
+    const rewardItems = [
+      {
+        asset: coinIconAsset,
+        fallback: "$",
+        color: "#f2b400",
+        fallbackColor: "#1d1d1d",
+        amount: dayReward.coins
+      },
+      {
+        asset: heartIconAsset,
+        fallback: "+",
+        color: "#ff6f8e",
+        fallbackColor: "#fbfbfb",
+        amount: dayReward.hearts
+      }
+    ].filter((item) => item.amount > 0);
+
+    if (rewardItems.length > 1) {
+      const rewardYs = [card.y + 31, card.y + 47];
+      for (let index = 0; index < rewardItems.length; index += 1) {
+        drawCheckInRewardItem(context, rewardItems[index], card.x + card.width / 2, rewardYs[index], {
+        iconSize: 13,
+        fontSize: 11,
+        gap: 2,
+        textColor: active ? "#1d1d1d" : claimed ? "#dcfce7" : "#fbfbfb"
+      });
+      }
+      return;
+    }
+
+    const rewardY = card.y + 38;
+    for (let index = 0; index < rewardItems.length; index += 1) {
+      const itemX = card.x + card.width / 2;
+      drawCheckInRewardItem(context, rewardItems[index], itemX, rewardY, {
+        iconSize: 16,
+        fontSize: 13,
+        gap: 2,
+        textColor: active ? "#1d1d1d" : claimed ? "#dcfce7" : "#fbfbfb"
+      });
+    }
+  }
+
+  function counterIconTarget(context, rect, type, state) {
+    const iconSize = 32;
+    const text = type === "coin" ? String(state.coins) : String(state.heartCount);
+    context.save();
+    context.font = "800 26px sans-serif";
+    const textWidth = context.measureText(text).width;
+    context.restore();
+    const totalWidth = iconSize + 6 + textWidth;
+    return {
+      x: screenWidth - rect.horizontalPadding - totalWidth + iconSize / 2,
+      y: rect.topInset + (type === "coin" ? 40 : 78)
+    };
+  }
+
+  function drawDailyClaimAnimation(context, state, rect, panel) {
+    if (!dailyClaimAnimation) {
+      return;
+    }
+
+    const elapsed = Date.now() - dailyClaimAnimation.startedAt;
+    const progress = clamp(elapsed / dailyClaimAnimation.duration, 0, 1);
+    const reward = dailyClaimAnimation.reward;
+    const card = checkInRewardCardLayout(panel, reward.day);
+    const items = checkInRewardItems(reward);
+    const sourceX = card.x + card.width / 2;
+    const sourceY = card.y + card.height / 2;
+
+    if (elapsed < 150) {
+      const pulse = Math.sin((elapsed / 150) * Math.PI);
+      const inset = -6 - pulse * 6;
+      context.save();
+      roundedRect(
+        context,
+        card.x + inset,
+        card.y + inset,
+        card.width - inset * 2,
+        card.height - inset * 2,
+        14
+      );
+      context.strokeStyle = `rgba(250,204,21,${0.35 + pulse * 0.45})`;
+      context.lineWidth = 2 + pulse * 2;
+      context.stroke();
+      context.restore();
+    }
+
+    if (progress >= 0.75) {
+      const glow = Math.sin(clamp((progress - 0.75) / 0.25, 0, 1) * Math.PI);
+      for (const item of items) {
+        const target = counterIconTarget(context, rect, item.type, state);
+        context.save();
+        context.beginPath();
+        context.arc(target.x, target.y, 28 + glow * 10, 0, Math.PI * 2);
+        context.strokeStyle = item.type === "coin"
+          ? `rgba(250,204,21,${0.18 + glow * 0.32})`
+          : `rgba(255,111,142,${0.18 + glow * 0.32})`;
+        context.lineWidth = 2;
+        context.stroke();
+        context.restore();
+      }
+    }
+
+    for (let index = 0; index < items.length; index += 1) {
+      const item = items[index];
+      const itemDelay = 150 + index * 90;
+      const itemDuration = 600;
+      const flight = clamp((elapsed - itemDelay) / itemDuration, 0, 1);
+      if (flight <= 0 || flight >= 1) {
+        continue;
+      }
+
+      const eased = easeOutCubic(flight);
+      const target = counterIconTarget(context, rect, item.type, state);
+      const arcLift = Math.sin(flight * Math.PI) * 46;
+      const x = lerp(sourceX, target.x, eased);
+      const y = lerp(sourceY, target.y, eased) - arcLift;
+      const size = lerp(34, 22, eased);
+      const alpha = 1 - Math.max(0, flight - 0.82) / 0.18;
+
+      drawRewardIcon(context, item, x, y, size, alpha);
+
+      context.save();
+      context.globalAlpha = 0.55 * alpha;
+      context.fillStyle = item.type === "coin" ? "#facc15" : "#ff8fab";
+      for (let spark = 0; spark < 3; spark += 1) {
+        const angle = spark * Math.PI * 0.72 + flight * Math.PI * 2;
+        context.beginPath();
+        context.arc(
+          x - Math.cos(angle) * (10 + spark * 3),
+          y - Math.sin(angle) * (8 + spark * 2),
+          2,
+          0,
+          Math.PI * 2
+        );
+        context.fill();
+      }
+      context.restore();
+    }
+
+    drawCoinCounter(context, screenWidth - rect.horizontalPadding, rect.topInset + 40, state.coins);
+    drawHeartCounter(context, screenWidth - rect.horizontalPadding, rect.topInset + 78, state.heartCount);
+  }
+
   function drawColoredTitle(context, x, y) {
     const colors = ["#ef4444", "#facc15", "#3b82f6", "#22c55e"];
     const characters = Array.from(texts.title);
@@ -1623,7 +2148,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       drawColoredTitle(context, screenWidth / 2, rect.y + 138);
       drawMenuStats(context, rect);
       drawGearButton(context, currentButtons().find((button) => button.id === "menu-settings"));
-      drawCoinCounter(context, screenWidth - rect.horizontalPadding, rect.topInset + 40, state.coins);
+      drawTopRightResourceCounters(context, rect, state);
       if (!overlay) {
         const progressLevel = unfinishedProgressLevel();
         drawButton(
@@ -1661,7 +2186,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       context.fillStyle = "#fbfbfb";
       context.font = "700 42px sans-serif";
       context.fillText(String(state.round), screenWidth / 2, rect.topInset + 54);
-      drawCoinCounter(context, screenWidth - rect.horizontalPadding, rect.topInset + 40, state.coins);
+      drawTopRightResourceCounters(context, rect, state);
 
       const pauseButton = currentButtons().find((button) => button.id === "pause");
       if (pauseButton && state.state !== "gameover") {
@@ -1694,18 +2219,29 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     const gameOverPanelYScale = overlay === "gameover" && continueUsedThisRun ? 0.16 : 0.24;
     const gameOverPanelHeightScale = overlay === "gameover" && continueUsedThisRun ? 0.68 : 0.54;
-    const panelYScale = overlay === "confirm-new-run" || overlay === "pause"
-      ? 0.16
-      : gameOverPanelYScale;
-    const panelHeightScale = overlay === "confirm-new-run" || overlay === "pause"
-      ? 0.68
-      : gameOverPanelHeightScale;
-    const panel = {
-      x: rect.x + 24,
-      y: rect.y + rect.height * panelYScale,
-      width: rect.width - 48,
-      height: rect.height * panelHeightScale
-    };
+    const panelYScale = overlay === "daily-checkin"
+      ? 0.04
+      : overlay === "confirm-new-run" || overlay === "pause"
+        ? 0.16
+        : overlay === "heart-continue"
+          ? HEART_CONTINUE_PANEL_Y_SCALE
+          : gameOverPanelYScale;
+    const panelHeightScale = overlay === "daily-checkin"
+      ? 0.9
+      : overlay === "confirm-new-run" || overlay === "pause"
+        ? 0.68
+        : gameOverPanelHeightScale;
+    const panelSideInset = overlay === "daily-checkin" ? 18 : 24;
+    const panel = overlay === "daily-checkin"
+      ? checkInPanelRect(rect)
+      : overlay === "heart-continue"
+        ? heartContinuePanelRect(rect)
+      : {
+          x: rect.x + panelSideInset,
+          y: rect.y + rect.height * panelYScale,
+          width: rect.width - panelSideInset * 2,
+          height: rect.height * panelHeightScale
+        };
 
     roundedRect(context, panel.x, panel.y, panel.width, panel.height, 28);
     context.fillStyle = "#262626";
@@ -1725,7 +2261,11 @@ export function bootMiniGame(wxApi = globalThis.wx) {
           ? texts.settings
           : overlay === "confirm-new-run"
             ? texts.unfinishedTitle
-            : texts.runOver;
+            : overlay === "heart-continue"
+              ? texts.useHeartTitle
+              : overlay === "daily-checkin"
+                ? texts.dailyCheckIn
+                : texts.runOver;
     context.fillText(
       overlayTitle,
       screenWidth / 2,
@@ -1736,6 +2276,47 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       drawCloseButton(context, currentButtons().find((button) =>
         button.id === (overlay === "gameover" ? "gameover-close" : "confirm-new-close")
       ));
+    }
+
+    if (overlay === "daily-checkin" && pendingCheckIn?.reward) {
+      const reward = pendingCheckIn.reward;
+      context.fillStyle = "rgba(255,255,255,0.82)";
+      context.font = "20px sans-serif";
+      context.textAlign = "center";
+      context.fillText(texts.dailyStreak(reward.day), screenWidth / 2, panel.y + 86);
+
+      const gridTop = panel.y + 122;
+      const cardGap = 10;
+      const cardHeight = 66;
+      for (const dayReward of DAILY_CHECK_IN_REWARDS) {
+        const card = checkInRewardCardLayout(panel, dayReward.day);
+        drawCheckInDayCard(
+          context,
+          card,
+          dayReward,
+          dayReward.day === reward.day,
+          dayReward.day <= reward.day
+        );
+      }
+
+      context.fillStyle = pendingCheckIn.chainBroken ? "#facc15" : "rgba(255,255,255,0.72)";
+      context.font = "15px sans-serif";
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      const reminderLines = pendingCheckIn.chainBroken
+        ? [texts.dailyReset]
+        : texts.dailyKeepGoing.split(", ");
+      const reminderTop = gridTop + cardHeight * 2 + cardGap + (reminderLines.length > 1 ? 26 : 34);
+      for (let index = 0; index < reminderLines.length; index += 1) {
+        context.fillText(reminderLines[index], screenWidth / 2, reminderTop + index * 20);
+      }
+    }
+
+    if (overlay === "heart-continue") {
+      context.fillStyle = "rgba(255,255,255,0.82)";
+      context.font = "18px sans-serif";
+      context.textAlign = "center";
+      context.fillText(texts.useHeartHint, screenWidth / 2, panel.y + 92);
     }
 
     if (overlay === "settings") {
@@ -1791,7 +2372,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         "share-continue": texts.shareContinue,
         restart: texts.restart,
         "confirm-new-continue": texts.continueChallenge,
-        "confirm-new-start": texts.startNew
+        "confirm-new-start": texts.startNew,
+        "heart-use": texts.useHeart,
+        "heart-decline": texts.noThanks,
+        "daily-checkin-ok": texts.claim
       };
 
       if (button.id === "toggle-sound") {
@@ -1808,6 +2392,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
           button.id === "share-continue" ||
           button.id === "confirm-new-continue" ||
           button.id === "confirm-new-start" ||
+          button.id === "heart-use" ||
+          button.id === "daily-checkin-ok" ||
           button.id === "restart" ||
         button.id === "settings-done"
       );
@@ -1815,6 +2401,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     if (overlay === "gameover" && continueUsedThisRun && gameOverResult?.brokeRecord) {
       drawRecordConfetti(context);
+    }
+
+    if (overlay === "daily-checkin") {
+      drawDailyClaimAnimation(context, state, rect, panel);
     }
   }
 
@@ -1971,6 +2561,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   wxApi.onHide?.(() => {
     persistProgress(true);
   });
+  wxApi.onShow?.(() => {
+    claimDailyCheckIn();
+  });
 
   function loop() {
     const now = Date.now();
@@ -2003,9 +2596,11 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         };
         newRecordCheerPlayed = false;
         resetRecordConfetti();
-        overlay = "gameover";
-        hasStartedRun = false;
-        clearSavedProgress();
+        overlay = gameOverRecoveryOverlay(finalState);
+        if (overlay === "gameover" && continueUsedThisRun) {
+          hasStartedRun = false;
+          clearSavedProgress();
+        }
       }
     }
 
@@ -2034,6 +2629,25 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     syncBestScore();
     syncCoins();
+    syncHearts();
+    if (
+      dailyClaimAnimation &&
+      Date.now() - dailyClaimAnimation.startedAt >= dailyClaimAnimation.duration
+    ) {
+      if (pendingCheckIn) {
+        storage.saveDailyCheckIn(pendingCheckIn.state);
+        game.grantRewards(pendingCheckIn.reward);
+        storage.saveCoins(game.getState().coins);
+        storage.saveHearts(game.getState().heartCount);
+        lastSavedCoins = game.getState().coins;
+        lastSavedHearts = game.getState().heartCount;
+      }
+      dailyClaimAnimation = null;
+      pendingCheckIn = null;
+      if (overlay === "daily-checkin") {
+        overlay = null;
+      }
+    }
     if (screen === "game" && overlay !== "gameover") {
       persistProgress();
     }
@@ -2057,5 +2671,6 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     scheduleFrame(loop);
   }
 
+  claimDailyCheckIn();
   loop();
 }
