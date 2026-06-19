@@ -293,6 +293,7 @@ export function createGameController({
         tone: "heart"
       });
     }
+    audioBus.emit("revive");
     return true;
   }
 
@@ -304,7 +305,6 @@ export function createGameController({
     return cloneSerializable({
       round: gameState.round,
       score: gameState.score,
-      bestScore: gameState.bestScore,
       skins: gameState.skins,
       ballsOwned: gameState.ballsOwned,
       ballsLaunched: gameState.ballsLaunched,
@@ -345,7 +345,7 @@ export function createGameController({
 
     nextState.round = Math.max(1, Math.floor(restoreNumber(snapshot.round, nextState.round)));
     nextState.score = Math.max(0, Math.floor(restoreNumber(snapshot.score, nextState.score)));
-    nextState.bestScore = Math.max(0, Math.floor(restoreNumber(snapshot.bestScore, nextState.bestScore)));
+    nextState.bestScore = Math.max(0, Math.floor(gameState.bestScore));
     nextState.skins = normalizeSkins(snapshot.skins ?? nextState.skins, config);
     nextState.ballsOwned = Math.max(1, Math.floor(restoreNumber(snapshot.ballsOwned, nextState.ballsOwned)));
     nextState.ballsLaunched = Math.max(0, Math.floor(restoreNumber(snapshot.ballsLaunched, nextState.ballsLaunched)));

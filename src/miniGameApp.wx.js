@@ -283,6 +283,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   const cheerSoundPlayer = createSoundPlayer(wxApi, "src/assets/sound/cheer.mp3", {
     volume: 0.72
   });
+  const reviveSoundPlayer = createSoundPlayer(wxApi, "src/assets/sound/revive.mp3", {
+    volume: 0.76
+  });
 
   const boardGenerator = createBoardGenerator(GAME_CONFIG);
   const game = createGameController({
@@ -302,6 +305,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
     if (type === "newRecord") {
       cheerSoundPlayer.play();
+    }
+    if (type === "revive") {
+      reviveSoundPlayer.play();
     }
   });
 
@@ -450,7 +456,6 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     return {
       version: GAME_PROGRESS_VERSION,
       savedAt: Date.now(),
-      bestScore,
       continueUsedThisRun,
       snapshot
     };
@@ -611,7 +616,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     gameOverResult = null;
     newRecordCheerPlayed = false;
     resetRecordConfetti();
-    bestScore = Math.max(bestScore, Number(progress.bestScore) || 0);
+    bestScore = Math.max(bestScore, storage.loadBestScore());
     tutorialIdleTime = 0;
     tutorialDismissed = true;
     lastSavedProgressJson = JSON.stringify(progress);

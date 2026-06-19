@@ -56,16 +56,19 @@ test("game state snapshot can be exported and restored", () => {
 
   const snapshot = game.exportSnapshot();
   assert.ok(snapshot);
+  assert.equal(Object.hasOwn(snapshot, "bestScore"), false);
 
   const restored = createGameController({
     boardGenerator: createBoardGenerator([{ blocks: [], pickups: [] }]),
     audioBus: createAudioBus()
   });
+  restored.getState().bestScore = 7;
 
   assert.equal(restored.importSnapshot(snapshot), true);
   assert.deepEqual(restored.getState().blocks, game.getState().blocks);
   assert.equal(restored.getState().state, game.getState().state);
   assert.equal(restored.getState().round, game.getState().round);
+  assert.equal(restored.getState().bestScore, 7);
 });
 
 test("low launch angles hide the guide and do not fire", () => {

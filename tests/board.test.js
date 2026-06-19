@@ -25,10 +25,56 @@ test("board generator scales brick count by current round and keeps hp gentle", 
   assert.equal(generated.pickups.length, 1);
 });
 
+test("board generator adds hp difficulty every 50 rounds", () => {
+  const config = {
+    ...GAME_CONFIG,
+    spawn: {
+      ...GAME_CONFIG.spawn,
+      coinChance: 0
+    }
+  };
+
+  assert.ok(createBoardGenerator(config, () => 0).generateRound(49, []).blocks.every((block) => block.hp === 49));
+  assert.ok(createBoardGenerator(config, () => 0).generateRound(50, []).blocks.every((block) => block.hp === 53));
+  assert.ok(createBoardGenerator(config, () => 0).generateRound(100, []).blocks.every((block) => block.hp === 110));
+});
+
 test("board generator avoids spawning into occupied top-row columns", () => {
   const generator = createBoardGenerator(GAME_CONFIG, 999);
   const generated = generator.generateRound(3, [{ row: 0, column: 2 }]);
   assert.equal(generated.blocks.some((block) => block.column === 2), false);
+});
+
+test("board generator spawns at least one block when a legal column exists", () => {
+  const generator = createBoardGenerator({
+    ...GAME_CONFIG,
+    columns: 3,
+    spawn: {
+      ...GAME_CONFIG.spawn,
+      coinChance: 0
+    }
+  }, () => 0);
+  const generated = generator.generateRound(1, [{ row: 0, column: 1 }]);
+
+  assert.equal(generated.pickups[0].column, 0);
+  assert.deepEqual(generated.blocks.map((block) => block.column), [2]);
+});
+
+test("board generator returns no blocks when every legal column is occupied", () => {
+  const generator = createBoardGenerator({
+    ...GAME_CONFIG,
+    columns: 3,
+    spawn: {
+      ...GAME_CONFIG.spawn,
+      coinChance: 0
+    }
+  }, () => 0);
+  const generated = generator.generateRound(1, [
+    { row: 0, column: 1 },
+    { row: 0, column: 2 }
+  ]);
+
+  assert.deepEqual(generated.blocks, []);
 });
 
 test("board generator can spawn a coin without overlapping blocks or pickups", () => {

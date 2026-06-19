@@ -103,10 +103,56 @@ test("board generator scales brick count by current round and keeps hp gentle", 
   assert.equal(generated.pickups.length, 1);
 });
 
+test("board generator adds hp difficulty every 50 rounds", () => {
+  const config = {
+    ...GAME_CONFIG,
+    spawn: {
+      ...GAME_CONFIG.spawn,
+      coinChance: 0
+    }
+  };
+
+  assert.ok(createBoardGenerator(config, () => 0).generateRound(49, []).blocks.every((block) => block.hp === 49));
+  assert.ok(createBoardGenerator(config, () => 0).generateRound(50, []).blocks.every((block) => block.hp === 53));
+  assert.ok(createBoardGenerator(config, () => 0).generateRound(100, []).blocks.every((block) => block.hp === 110));
+});
+
 test("board generator avoids spawning into occupied top-row columns", () => {
   const generator = createBoardGenerator(GAME_CONFIG, 999);
   const generated = generator.generateRound(3, [{ row: 0, column: 2 }]);
   assert.equal(generated.blocks.some((block) => block.column === 2), false);
+});
+
+test("board generator spawns at least one block when a legal column exists", () => {
+  const generator = createBoardGenerator({
+    ...GAME_CONFIG,
+    columns: 3,
+    spawn: {
+      ...GAME_CONFIG.spawn,
+      coinChance: 0
+    }
+  }, () => 0);
+  const generated = generator.generateRound(1, [{ row: 0, column: 1 }]);
+
+  assert.equal(generated.pickups[0].column, 0);
+  assert.deepEqual(generated.blocks.map((block) => block.column), [2]);
+});
+
+test("board generator returns no blocks when every legal column is occupied", () => {
+  const generator = createBoardGenerator({
+    ...GAME_CONFIG,
+    columns: 3,
+    spawn: {
+      ...GAME_CONFIG.spawn,
+      coinChance: 0
+    }
+  }, () => 0);
+  const generated = generator.generateRound(1, [
+    { row: 0, column: 1 },
+    { row: 0, column: 2 }
+  ]);
+
+  assert.deepEqual(generated.blocks, []);
 });
 
 test("board generator can spawn a coin without overlapping blocks or pickups", () => {
@@ -356,13 +402,40 @@ test("snapshot leaves held hearts as a persistent wallet balance", () => {
   assert.equal(restored.getState().heartCount, 1);
 });
 
-test("consumeHeartContinue spends one heart and resumes from gameover", () => {
+test("snapshot leaves best score as a persistent game balance", () => {
   const game = createGameController({
     boardGenerator: createRoundSequence([
       { blocks: [], pickups: [] },
       { blocks: [], pickups: [] }
     ]),
     audioBus: createSilentAudioBus()
+  });
+
+  const snapshot = game.exportSnapshot();
+  assert.equal(Object.hasOwn(snapshot, "bestScore"), false);
+
+  const staleSnapshot = {
+    ...snapshot,
+    bestScore: 0
+  };
+  const restored = createGameController({
+    boardGenerator: createRoundSequence([{ blocks: [], pickups: [] }]),
+    audioBus: createSilentAudioBus()
+  });
+  restored.getState().bestScore = 12;
+
+  assert.equal(restored.importSnapshot(staleSnapshot), true);
+  assert.equal(restored.getState().bestScore, 12);
+});
+
+test("consumeHeartContinue spends one heart and resumes from gameover", () => {
+  const audioBus = createRecordingAudioBus();
+  const game = createGameController({
+    boardGenerator: createRoundSequence([
+      { blocks: [], pickups: [] },
+      { blocks: [], pickups: [] }
+    ]),
+    audioBus
   });
 
   const state = game.getState();
@@ -385,6 +458,7 @@ test("consumeHeartContinue spends one heart and resumes from gameover", () => {
   assert.equal(continued.gameOver, false);
   assert.deepEqual(continued.blocks.map((block) => block.id), ["safe"]);
   assert.ok(continued.heartConsumeEffect);
+  assert.equal(audioBus.events.some((event) => event.type === "revive"), true);
 });
 
 test("consumeHeartContinue is ignored without a held heart", () => {

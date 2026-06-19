@@ -59,12 +59,17 @@ const audioBus = createAudioBus();
 audioBus.setEnabled(settings.soundEnabled);
 soundToggle.checked = settings.soundEnabled;
 const coinSound = typeof Audio === "undefined" ? null : new Audio("./src/assets/sound/coin.mp3");
+const reviveSound = typeof Audio === "undefined" ? null : new Audio("./src/assets/sound/revive.mp3");
 
 audioBus.onEvent((event) => {
   console.debug("Audio hook:", event.type, event.payload);
   if (event.type === "coin" && coinSound) {
     coinSound.currentTime = 0;
     coinSound.play().catch(() => {});
+  }
+  if (event.type === "revive" && reviveSound) {
+    reviveSound.currentTime = 0;
+    reviveSound.play().catch(() => {});
   }
 });
 
