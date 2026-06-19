@@ -47,6 +47,7 @@ const texts = {
   dailyKeepGoing: "连续登录领大奖, 中断将从第 1 天重新开始",
   dailyResetHint: "",
   dailyReset: "连续签到中断，从第 1 天开始",
+  dailyRewards: "每日奖励",
   claim: "领取",
   newRecord: "新纪录",
   brokePreviousRecord: (level) => `你已突破之前的第 ${level} 关纪录`,
@@ -250,6 +251,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   const speedIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/fast-forward.png");
   const trophyIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/trophy.png");
   const confettiIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/confetti.png");
+  const dailyRewardsIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/gift-box.png");
   const ballSkinAssets = Object.fromEntries(
     GAME_CONFIG.skins.ball
       .map((skin) => skin.gameImage ?? skin.image)
@@ -338,6 +340,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let shopDragStartScrollY = 0;
   let shopDragging = false;
   let pendingCheckIn = null;
+  let dailyRewardsView = null;
   let dailyClaimAnimation = null;
 
   const scheduleFrame =
@@ -427,6 +430,18 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
 
     pendingCheckIn = result;
+    dailyRewardsView = result;
+    overlay = "daily-checkin";
+  }
+
+  function openDailyRewards() {
+    if (dailyClaimAnimation) {
+      return;
+    }
+
+    const result = resolveDailyCheckIn(storage.loadDailyCheckIn(), formatLocalDate());
+    dailyRewardsView = result;
+    pendingCheckIn = result.claimed ? result : null;
     overlay = "daily-checkin";
   }
 
@@ -437,6 +452,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     if (!pendingCheckIn) {
       overlay = null;
+      dailyRewardsView = null;
       return;
     }
 
@@ -920,10 +936,17 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       if (overlay === null) {
         const hasProgress = hasUnfinishedRun();
         const firstButtonY = hasProgress ? rect.y + rect.height * 0.58 : rect.y + rect.height * 0.66;
+        buttons.push({
+          id: "daily-rewards",
+          x: screenWidth - rect.horizontalPadding - 82,
+          y: rect.topInset + 100,
+          width: 82,
+          height: 64
+        });
         if (hasProgress) {
           buttons.push({
             id: "continue-challenge",
-            x: rect.x + 32,
+            x: rect.x + 30,
             y: firstButtonY,
             width: rect.width - 64,
             height: 56
@@ -1142,6 +1165,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         break;
       case "daily-checkin-ok":
         collectDailyCheckInReward();
+        break;
+      case "daily-rewards":
+        openDailyRewards();
         break;
       case "gameover-close":
         if (!continueUsedThisRun) {
@@ -1570,6 +1596,60 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
   }
 
+  function drawDailyRewardsButton(context, button) {
+    if (!button) {
+      return;
+    }
+
+    context.save();
+    const centerX = button.x + button.width / 2;
+    const iconSize = 46;
+    const iconX = centerX - iconSize / 2;
+    const iconY = button.y;
+    if (dailyRewardsIconAsset.loaded && dailyRewardsIconAsset.image) {
+      context.drawImage(
+        dailyRewardsIconAsset.image,
+        iconX,
+        iconY,
+        iconSize,
+        iconSize
+      );
+    } else {
+      roundedRect(context, iconX, iconY, iconSize, iconSize, 12);
+      context.fillStyle = "#f2b400";
+      context.fill();
+      context.strokeStyle = "rgba(0,0,0,0.18)";
+      context.lineWidth = 2;
+      context.stroke();
+    }
+
+    const labelHeight = 22;
+    const labelWidth = Math.min(button.width, 76);
+    const labelX = centerX - labelWidth / 2;
+    const labelY = iconY + iconSize + 5;
+    roundedRect(context, labelX, labelY - labelHeight / 2, labelWidth, labelHeight, labelHeight / 2);
+    context.fillStyle = "rgba(12,32,72,0.82)";
+    context.fill();
+
+    const maxTextWidth = labelWidth - 10;
+    let fontSize = 14;
+    context.font = `900 ${fontSize}px sans-serif`;
+    const measuredWidth = context.measureText(texts.dailyRewards).width;
+    if (measuredWidth > maxTextWidth) {
+      fontSize = Math.max(12, Math.floor(fontSize * (maxTextWidth / measuredWidth)));
+      context.font = `900 ${fontSize}px sans-serif`;
+    }
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.lineJoin = "round";
+    context.lineWidth = 4;
+    context.strokeStyle = "rgba(0,0,0,0.72)";
+    context.strokeText(texts.dailyRewards, centerX, labelY);
+    context.fillStyle = "#fff7d6";
+    context.fillText(texts.dailyRewards, centerX, labelY);
+    context.restore();
+  }
+
   function drawCoinCounter(context, x, y, coins, align = "right") {
     const iconSize = 32;
     const text = String(coins);
@@ -1632,9 +1712,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     context.restore();
   }
 
-  function drawTopRightResourceCounters(context, rect, state) {
-    drawCoinCounter(context, screenWidth - rect.horizontalPadding, rect.topInset + 40, state.coins);
-    drawHeartCounter(context, screenWidth - rect.horizontalPadding, rect.topInset + 78, state.heartCount);
+  function drawTopRightResourceCounters(context, rect, state, yOffset = 0) {
+    drawCoinCounter(context, screenWidth - rect.horizontalPadding, rect.topInset + 40 + yOffset, state.coins);
+    drawHeartCounter(context, screenWidth - rect.horizontalPadding, rect.topInset + 78 + yOffset, state.heartCount);
   }
 
   function drawCheckInRewardItem(context, item, x, y, options = {}) {
@@ -2154,6 +2234,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       drawMenuStats(context, rect);
       drawGearButton(context, currentButtons().find((button) => button.id === "menu-settings"));
       drawTopRightResourceCounters(context, rect, state);
+      drawDailyRewardsButton(context, currentButtons().find((button) => button.id === "daily-rewards"));
       if (!overlay) {
         const progressLevel = unfinishedProgressLevel();
         drawButton(
@@ -2283,12 +2364,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       ));
     }
 
-    if (overlay === "daily-checkin" && pendingCheckIn?.reward) {
-      const reward = pendingCheckIn.reward;
+    if (overlay === "daily-checkin" && (pendingCheckIn?.reward || dailyRewardsView?.state)) {
+      const rewardDay = pendingCheckIn?.reward?.day || dailyRewardsView?.state?.lastRewardDay || 1;
       context.fillStyle = "rgba(255,255,255,0.82)";
       context.font = "20px sans-serif";
       context.textAlign = "center";
-      context.fillText(texts.dailyStreak(reward.day), screenWidth / 2, panel.y + 86);
+      context.fillText(texts.dailyStreak(rewardDay), screenWidth / 2, panel.y + 86);
 
       const gridTop = panel.y + 122;
       const cardGap = 10;
@@ -2299,16 +2380,16 @@ export function bootMiniGame(wxApi = globalThis.wx) {
           context,
           card,
           dayReward,
-          dayReward.day === reward.day,
-          dayReward.day <= reward.day
+          dayReward.day === rewardDay,
+          dayReward.day <= rewardDay
         );
       }
 
-      context.fillStyle = pendingCheckIn.chainBroken ? "#facc15" : "rgba(255,255,255,0.72)";
+      context.fillStyle = pendingCheckIn?.chainBroken ? "#facc15" : "rgba(255,255,255,0.72)";
       context.font = "15px sans-serif";
       context.textAlign = "center";
       context.textBaseline = "middle";
-      const reminderLines = pendingCheckIn.chainBroken
+      const reminderLines = pendingCheckIn?.chainBroken
         ? [texts.dailyReset]
         : texts.dailyKeepGoing.split(", ");
       const reminderTop = gridTop + cardHeight * 2 + cardGap + (reminderLines.length > 1 ? 26 : 34);
@@ -2380,7 +2461,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         "confirm-new-start": texts.startNew,
         "heart-use": texts.useHeart,
         "heart-decline": texts.noThanks,
-        "daily-checkin-ok": texts.claim
+        "daily-checkin-ok": pendingCheckIn?.reward ? texts.claim : texts.done
       };
 
       if (button.id === "toggle-sound") {
@@ -2398,7 +2479,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
           button.id === "confirm-new-continue" ||
           button.id === "confirm-new-start" ||
           button.id === "heart-use" ||
-          button.id === "daily-checkin-ok" ||
+          (button.id === "daily-checkin-ok" && Boolean(pendingCheckIn?.reward)) ||
           button.id === "restart" ||
         button.id === "settings-done"
       );
@@ -2649,6 +2730,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       }
       dailyClaimAnimation = null;
       pendingCheckIn = null;
+      dailyRewardsView = null;
       if (overlay === "daily-checkin") {
         overlay = null;
       }
