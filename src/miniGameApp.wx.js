@@ -94,7 +94,7 @@ function settingsPanelRect(rect) {
     x: rect.x + panelSideInset,
     y: rect.y + rect.height * 0.24,
     width: rect.width - panelSideInset * 2,
-    height: rect.height * 0.54
+    height: rect.height * 0.58
   };
 }
 
@@ -1068,9 +1068,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
           },
           {
             id: "settings-done",
-            x: settingsPanel.x + 52,
-            y: settingsPanel.y + settingsPanel.height - 88,
-            width: settingsPanel.width - 104,
+            x: settingsPanel.x + 36,
+            y: settingsPanel.y + settingsPanel.height - 76,
+            width: settingsPanel.width - 72,
             height: 52
           }
         );
@@ -1192,9 +1192,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         },
         {
           id: "settings-done",
-          x: settingsPanel.x + 52,
-          y: settingsPanel.y + settingsPanel.height - 88,
-          width: settingsPanel.width - 104,
+          x: settingsPanel.x + 36,
+          y: settingsPanel.y + settingsPanel.height - 76,
+          width: settingsPanel.width - 72,
           height: 52
         }
       );
