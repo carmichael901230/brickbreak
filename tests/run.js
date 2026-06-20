@@ -4,6 +4,7 @@ import { createBoardGenerator } from "../src/board.js";
 import { resolveDailyCheckIn } from "../src/checkIn.js";
 import { GAME_CONFIG } from "../src/config.js";
 import { createGameController } from "../src/gameState.js";
+import { createLeaderboard, maskWeChatName } from "../src/leaderboard.js";
 import { clampLaunchDirection, reflectBall, resolveBallBlockCollision } from "../src/physics.js";
 import { createStorageAdapter } from "../src/storage.js";
 
@@ -289,6 +290,20 @@ test("daily check-in grants the day seven big reward", () => {
   assert.equal(result.reward.coins, 100);
   assert.equal(result.reward.hearts, 1);
   assert.equal(result.reward.big, true);
+});
+
+test("leaderboard masks fake WeChat names", () => {
+  assert.equal(maskWeChatName("Li"), "L*");
+  assert.equal(maskWeChatName("Alice"), "A***e");
+});
+
+test("leaderboard estimates current user position", () => {
+  const lowBoard = createLeaderboard({ currentBestLevel: 1, boardType: "total" });
+  const highBoard = createLeaderboard({ currentBestLevel: 1090, boardType: "province" });
+
+  assert.equal(lowBoard.currentUser.isCurrentUser, true);
+  assert.equal(lowBoard.currentUser.rankLabel, "999+");
+  assert.equal(highBoard.topRows.some((row) => row.isCurrentUser), true);
 });
 
 test("storage adapter persists and loads skin ownership", () => {

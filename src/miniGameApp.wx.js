@@ -3,6 +3,7 @@ import { createBoardGenerator } from "./board.js";
 import { DAILY_CHECK_IN_REWARDS, formatLocalDate, resolveDailyCheckIn } from "./checkIn.js";
 import { GAME_CONFIG } from "./config.js";
 import { createGameController } from "./gameState.js";
+import { createLeaderboard, FAKE_LEADERBOARD_USERS, LEADERBOARD_BOARD_TYPES } from "./leaderboard.js";
 import { createRenderer } from "./render.js";
 import { createWeChatStorageAdapter } from "./storage.js";
 
@@ -48,6 +49,11 @@ const texts = {
   dailyResetHint: "",
   dailyReset: "连续签到中断，从第 1 天开始",
   dailyRewards: "每日奖励",
+  leaderboard: "排行榜",
+  totalRank: "总排名",
+  myRank: "我的排名",
+  rankPosition: (rank) => `第 ${rank} 名`,
+  currentUser: "我",
   claim: "领取",
   newRecord: "新纪录",
   brokePreviousRecord: (level) => `你已突破之前的第 ${level} 关纪录`,
@@ -252,6 +258,14 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   const trophyIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/trophy.png");
   const confettiIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/confetti.png");
   const dailyRewardsIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/gift-box.png");
+  const leaderboardAvatarAssets = Object.fromEntries(
+    FAKE_LEADERBOARD_USERS.map((user) => [user.avatar, loadImageAsset(wxApi, canvas, user.avatar)])
+  );
+  const leaderboardCrownAssets = {
+    1: loadImageAsset(wxApi, canvas, "src/assets/pic/crowns/crown-gold.png"),
+    2: loadImageAsset(wxApi, canvas, "src/assets/pic/crowns/crown-silver.png"),
+    3: loadImageAsset(wxApi, canvas, "src/assets/pic/crowns/crown-copper.png")
+  };
   const ballSkinAssets = Object.fromEntries(
     GAME_CONFIG.skins.ball
       .map((skin) => skin.gameImage ?? skin.image)
@@ -340,10 +354,13 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let shopDragStartY = 0;
   let shopDragStartScrollY = 0;
   let shopDragging = false;
+  let leaderboardScrollY = 0;
+  let leaderboardDragStartY = 0;
+  let leaderboardDragStartScrollY = 0;
+  let leaderboardDragging = false;
   let pendingCheckIn = null;
   let dailyRewardsView = null;
   let dailyClaimAnimation = null;
-
   const scheduleFrame =
     globalThis.requestAnimationFrame?.bind(globalThis) ||
     wxApi.requestAnimationFrame?.bind(wxApi) ||
@@ -885,9 +902,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       width: rect.width - 48,
       height: rect.height * 0.68
     };
+    const leaderboardPanel = leaderboardPanelRect(rect);
 
     if (screen === "menu") {
-      const buttons = overlay === "shop" || overlay === "settings" || overlay === "confirm-new-run" || overlay === "daily-checkin"
+      const buttons = overlay === "shop" || overlay === "settings" || overlay === "confirm-new-run" || overlay === "daily-checkin" || overlay === "leaderboard"
         ? []
         : [
             {
@@ -940,6 +958,17 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         return buttons;
       }
 
+      if (overlay === "leaderboard") {
+        buttons.push({
+          id: "leaderboard-close",
+          x: leaderboardPanel.x + leaderboardPanel.width - 44,
+          y: leaderboardPanel.y + 20,
+          width: 24,
+          height: 24
+        });
+        return buttons;
+      }
+
       if (overlay === null) {
         const hasProgress = hasUnfinishedRun();
         const firstButtonY = hasProgress ? rect.y + rect.height * 0.58 : rect.y + rect.height * 0.66;
@@ -974,6 +1003,13 @@ export function bootMiniGame(wxApi = globalThis.wx) {
             y: firstButtonY + (hasProgress ? 144 : 98),
             width: rect.width - 64,
             height: 56
+          },
+          {
+            id: "leaderboard",
+            x: rect.x + 32,
+            y: firstButtonY + (hasProgress ? 216 : 170),
+            width: rect.width - 64,
+            height: 52
           }
         );
       }
@@ -1175,6 +1211,15 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         break;
       case "daily-rewards":
         openDailyRewards();
+        break;
+      case "leaderboard":
+        leaderboardScrollY = 0;
+        overlay = "leaderboard";
+        break;
+      case "leaderboard-close":
+        leaderboardScrollY = 0;
+        leaderboardDragging = false;
+        overlay = null;
         break;
       case "gameover-close":
         if (!continueUsedThisRun) {
@@ -1657,6 +1702,392 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     context.restore();
   }
 
+  function drawLeaderboardAvatar(context, row, x, y, size) {
+    context.save();
+    context.beginPath();
+    context.arc(x + size / 2, y + size / 2, size / 2, 0, Math.PI * 2);
+    context.clip();
+    const asset = row.avatar ? leaderboardAvatarAssets[row.avatar] : null;
+    if (asset?.loaded && asset.image) {
+      context.drawImage(asset.image, x, y, size, size);
+    } else {
+      context.fillStyle = row.isCurrentUser ? "#f2b400" : row.avatarColor ?? "#38bdf8";
+      context.fillRect(x, y, size, size);
+      context.fillStyle = row.isCurrentUser ? "#1d1d1d" : "#fbfbfb";
+      context.font = `900 ${Math.max(13, size * 0.42)}px sans-serif`;
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText(row.isCurrentUser ? texts.currentUser : "★", x + size / 2, y + size / 2 + 1);
+    }
+    context.restore();
+
+    context.beginPath();
+    context.arc(x + size / 2, y + size / 2, size / 2, 0, Math.PI * 2);
+    context.strokeStyle = row.isCurrentUser ? "#facc15" : "rgba(255,255,255,0.22)";
+    context.lineWidth = row.isCurrentUser ? 2 : 1;
+    context.stroke();
+  }
+
+  function drawFittedText(context, text, x, y, maxWidth, fontWeight, fontSize, color, align = "left") {
+    let resolvedSize = fontSize;
+    context.font = `${fontWeight} ${resolvedSize}px sans-serif`;
+    const measuredWidth = context.measureText(text).width;
+    if (measuredWidth > maxWidth) {
+      resolvedSize = Math.max(10, Math.floor(resolvedSize * (maxWidth / measuredWidth)));
+      context.font = `${fontWeight} ${resolvedSize}px sans-serif`;
+    }
+    context.fillStyle = color;
+    context.textAlign = align;
+    context.fillText(text, x, y);
+  }
+
+  function leaderboardRankText(row) {
+    return row.rank ? texts.rankPosition(row.rank) : row.rankLabel;
+  }
+
+  function drawLeaderboardRankBadge(context, x, y, width, height, row, highlight = false) {
+    roundedRect(context, x, y, width, height, height / 2);
+    context.fillStyle = highlight ? "rgba(250,204,21,0.18)" : "rgba(10,15,35,0.72)";
+    context.fill();
+    context.strokeStyle = highlight ? "rgba(250,204,21,0.76)" : "rgba(250,204,21,0.42)";
+    context.lineWidth = 1;
+    context.stroke();
+    context.textBaseline = "middle";
+    drawFittedText(
+      context,
+      leaderboardRankText(row),
+      x + width / 2,
+      y + height / 2 + 1,
+      width - 12,
+      900,
+      12,
+      highlight ? "#facc15" : "#fde68a",
+      "center"
+    );
+  }
+
+  function drawLeaderboardRow(context, panel, row, y, rowHeight, highlight = false) {
+    const inset = 16;
+    const rowX = panel.x + inset;
+    const rowWidth = panel.width - inset * 2;
+    const radius = Math.min(16, rowHeight / 2);
+    roundedRect(context, rowX, y, rowWidth, rowHeight, radius);
+    context.fillStyle = highlight
+      ? "rgba(250,204,21,0.15)"
+      : "rgba(255,255,255,0.08)";
+    context.fill();
+    context.strokeStyle = highlight ? "rgba(250,204,21,0.34)" : "rgba(255,255,255,0.08)";
+    context.lineWidth = 1;
+    context.stroke();
+
+    const rankBadgeWidth = row.rank >= 10 ? 56 : 50;
+    const rankBadgeHeight = 24;
+    const rankBadgeX = rowX + rowWidth - rankBadgeWidth - 10;
+    const rankBadgeY = y + (rowHeight - rankBadgeHeight) / 2;
+    drawLeaderboardRankBadge(context, rankBadgeX, rankBadgeY, rankBadgeWidth, rankBadgeHeight, row, highlight);
+
+    const avatarSize = Math.min(38, rowHeight - 8);
+    const avatarX = rowX + 10;
+    drawLeaderboardAvatar(context, row, avatarX, y + (rowHeight - avatarSize) / 2, avatarSize);
+
+    const nameX = avatarX + avatarSize + 10;
+    const maxTextWidth = rankBadgeX - nameX - 10;
+    const levelText = texts.levelValue(row.bestLevel);
+    context.textAlign = "left";
+    context.textBaseline = "alphabetic";
+    drawFittedText(
+      context,
+      row.displayName ?? maskDisplayFallback(row),
+      nameX,
+      y + rowHeight / 2 - 4,
+      maxTextWidth,
+      900,
+      13,
+      highlight ? "#fef3c7" : "#fbfbfb"
+    );
+    drawFittedText(
+      context,
+      levelText,
+      nameX,
+      y + rowHeight / 2 + 14,
+      maxTextWidth,
+      900,
+      12,
+      highlight ? "#facc15" : "#22c55e"
+    );
+  }
+
+  function drawFallbackCrown(context, x, y, width, height, accentColor) {
+    context.save();
+    context.fillStyle = accentColor;
+    context.strokeStyle = "rgba(56,20,0,0.62)";
+    context.lineWidth = 2;
+    context.lineJoin = "round";
+    context.beginPath();
+    context.moveTo(x + width * 0.1, y + height * 0.42);
+    context.lineTo(x + width * 0.28, y + height * 0.54);
+    context.lineTo(x + width * 0.5, y + height * 0.16);
+    context.lineTo(x + width * 0.72, y + height * 0.54);
+    context.lineTo(x + width * 0.9, y + height * 0.42);
+    context.lineTo(x + width * 0.82, y + height * 0.82);
+    context.lineTo(x + width * 0.18, y + height * 0.82);
+    context.closePath();
+    context.fill();
+    context.stroke();
+    roundedRect(context, x + width * 0.16, y + height * 0.78, width * 0.68, height * 0.14, 4);
+    context.fill();
+    context.stroke();
+    context.restore();
+  }
+
+  function drawLeaderboardCrown(context, row, x, y, size, accentColor) {
+    const asset = leaderboardCrownAssets[row.rank];
+    if (asset?.loaded && asset.image) {
+      context.drawImage(asset.image, x, y, size, size);
+      return;
+    }
+    drawFallbackCrown(context, x + size * 0.1, y + size * 0.2, size * 0.8, size * 0.6, accentColor);
+  }
+
+  function drawLeaderboardTopCard(context, card, row, accentColor) {
+    roundedRect(context, card.x, card.y, card.width, card.height, 18);
+    const gradient = context.createLinearGradient(card.x, card.y, card.x, card.y + card.height);
+    gradient.addColorStop(0, "rgba(255,255,255,0.16)");
+    gradient.addColorStop(1, "rgba(255,255,255,0.04)");
+    context.fillStyle = gradient;
+    context.fill();
+    context.strokeStyle = accentColor;
+    context.lineWidth = row.rank === 1 ? 2 : 1;
+    context.stroke();
+
+    const rankBadgeWidth = row.rank === 1 ? 64 : 58;
+    const rankBadgeHeight = 24;
+    drawLeaderboardRankBadge(
+      context,
+      card.x + (card.width - rankBadgeWidth) / 2,
+      card.y + 10,
+      rankBadgeWidth,
+      rankBadgeHeight,
+      row,
+      row.rank === 1
+    );
+
+    const avatarSize = row.rank === 1 ? 64 : 54;
+    const avatarX = card.x + (card.width - avatarSize) / 2;
+    const avatarY = card.y + (row.rank === 1 ? 62 : 58);
+    const crownSize = row.rank === 1 ? 36 : 30;
+    drawLeaderboardAvatar(
+      context,
+      row,
+      avatarX,
+      avatarY,
+      avatarSize
+    );
+    drawLeaderboardCrown(
+      context,
+      row,
+      card.x + (card.width - crownSize) / 2,
+      avatarY - crownSize * 0.78,
+      crownSize,
+      accentColor
+    );
+
+    const nameY = card.y + card.height - 34;
+    const levelY = card.y + card.height - 14;
+    const textMaxWidth = card.width - 12;
+    context.textAlign = "center";
+    context.textBaseline = "alphabetic";
+    drawFittedText(
+      context,
+      row.displayName ?? maskDisplayFallback(row),
+      card.x + card.width / 2,
+      nameY,
+      textMaxWidth,
+      900,
+      12,
+      "#fbfbfb",
+      "center"
+    );
+    drawFittedText(
+      context,
+      texts.levelValue(row.bestLevel),
+      card.x + card.width / 2,
+      levelY,
+      textMaxWidth,
+      900,
+      12,
+      "#38bdf8",
+      "center"
+    );
+  }
+
+  function maskDisplayFallback(row) {
+    return row.isCurrentUser ? texts.currentUser : row.nickname ?? "";
+  }
+
+  function drawCurrentUserRankCard(context, panel, row, y, height) {
+    const inset = 16;
+    const cardX = panel.x + inset;
+    const cardWidth = panel.width - inset * 2;
+    roundedRect(context, cardX, y, cardWidth, height, 18);
+    context.fillStyle = "rgba(250,204,21,0.16)";
+    context.fill();
+    context.strokeStyle = "rgba(250,204,21,0.58)";
+    context.lineWidth = 1;
+    context.stroke();
+
+    const avatarSize = Math.min(42, height - 14);
+    const avatarX = cardX + 12;
+    const avatarY = y + (height - avatarSize) / 2;
+    drawLeaderboardAvatar(context, row, avatarX, avatarY, avatarSize);
+
+    const nameX = avatarX + avatarSize + 10;
+    const rankText = texts.rankPosition(row.rank);
+    const rankMaxWidth = Math.min(116, cardWidth * 0.42);
+    const rankX = cardX + cardWidth - 12;
+    const nameMaxWidth = rankX - rankMaxWidth - nameX - 12;
+
+    context.textBaseline = "alphabetic";
+    drawFittedText(
+      context,
+      texts.myRank,
+      nameX,
+      y + height / 2 - 7,
+      Math.max(52, nameMaxWidth),
+      800,
+      12,
+      "rgba(255,255,255,0.66)"
+    );
+    drawFittedText(
+      context,
+      texts.levelValue(row.bestLevel),
+      nameX,
+      y + height / 2 + 13,
+      Math.max(52, nameMaxWidth),
+      900,
+      13,
+      "#facc15"
+    );
+
+    context.textAlign = "right";
+    drawFittedText(
+      context,
+      rankText,
+      rankX,
+      y + height / 2 + 8,
+      rankMaxWidth,
+      900,
+      20,
+      "#fff7d6",
+      "right"
+    );
+  }
+
+  function leaderboardListMetrics(panel) {
+    const topY = panel.y + 78;
+    const topCardHeight = 154;
+    const rowsTop = topY + topCardHeight + 12;
+    const footerHeight = 62;
+    const footerGap = 8;
+    const footerY = panel.y + panel.height - footerHeight - 14;
+    const viewportHeight = Math.max(120, footerY - footerGap - rowsTop);
+    return {
+      rowsTop,
+      footerY,
+      footerHeight,
+      viewportHeight,
+      rowHeight: 40,
+      rowGap: 4
+    };
+  }
+
+  function clampLeaderboardScroll(rowCount, metrics) {
+    const contentHeight = rowCount * metrics.rowHeight + Math.max(0, rowCount - 1) * metrics.rowGap;
+    return clamp(leaderboardScrollY, 0, Math.max(0, contentHeight - metrics.viewportHeight));
+  }
+
+  function drawLeaderboardOverlay(context, panel) {
+    const board = createLeaderboard({
+      currentBestLevel: currentRecordLevel(),
+      boardType: LEADERBOARD_BOARD_TYPES.total
+    });
+
+    const contentX = panel.x + 14;
+    const contentWidth = panel.width - 28;
+    const topY = panel.y + 78;
+    const cardGap = 6;
+    const centerCardWidth = Math.min(98, contentWidth * 0.34);
+    const sideCardWidth = (contentWidth - centerCardWidth - cardGap * 2) / 2;
+    const topCardHeight = 154;
+    const topRows = board.topRows.slice(0, 3);
+    const topCards = [
+      {
+        row: topRows[1],
+        x: contentX,
+        y: topY + 16,
+        width: sideCardWidth,
+        height: topCardHeight - 16,
+        color: "#c7d2fe"
+      },
+      {
+        row: topRows[0],
+        x: contentX + sideCardWidth + cardGap,
+        y: topY,
+        width: centerCardWidth,
+        height: topCardHeight,
+        color: "#facc15"
+      },
+      {
+        row: topRows[2],
+        x: contentX + sideCardWidth + cardGap + centerCardWidth + cardGap,
+        y: topY + 22,
+        width: sideCardWidth,
+        height: topCardHeight - 22,
+        color: "#fb923c"
+      }
+    ];
+
+    for (const card of topCards) {
+      if (card.row) {
+        drawLeaderboardTopCard(context, card, card.row, card.color);
+      }
+    }
+
+    const metrics = leaderboardListMetrics(panel);
+    const listRows = board.rankedRows.filter((row) => !row.isCurrentUser).slice(3);
+    leaderboardScrollY = clampLeaderboardScroll(listRows.length, metrics);
+
+    context.save();
+    context.beginPath();
+    context.rect(panel.x, metrics.rowsTop, panel.width, metrics.viewportHeight);
+    context.clip();
+
+    for (let index = 0; index < listRows.length; index += 1) {
+      const row = listRows[index];
+      const rowY = metrics.rowsTop + index * (metrics.rowHeight + metrics.rowGap) - leaderboardScrollY;
+      if (rowY + metrics.rowHeight < metrics.rowsTop || rowY > metrics.rowsTop + metrics.viewportHeight) {
+        continue;
+      }
+      drawLeaderboardRow(context, panel, row, rowY, metrics.rowHeight, row.isCurrentUser);
+    }
+    context.restore();
+
+    const contentHeight = listRows.length * metrics.rowHeight + Math.max(0, listRows.length - 1) * metrics.rowGap;
+    if (contentHeight > metrics.viewportHeight) {
+      const trackHeight = metrics.viewportHeight;
+      const thumbHeight = clamp((metrics.viewportHeight / contentHeight) * trackHeight, 32, trackHeight);
+      const thumbY = metrics.rowsTop + (leaderboardScrollY / (contentHeight - metrics.viewportHeight)) * (trackHeight - thumbHeight);
+      roundedRect(context, panel.x + panel.width - 8, metrics.rowsTop, 3, trackHeight, 2);
+      context.fillStyle = "rgba(255,255,255,0.12)";
+      context.fill();
+      roundedRect(context, panel.x + panel.width - 8, thumbY, 3, thumbHeight, 2);
+      context.fillStyle = "rgba(250,204,21,0.62)";
+      context.fill();
+    }
+
+    drawCurrentUserRankCard(context, panel, board.currentUser, metrics.footerY, metrics.footerHeight);
+  }
+
   function drawCoinCounter(context, x, y, coins, align = "right") {
     const iconSize = 32;
     const text = String(coins);
@@ -1808,6 +2239,16 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       y: rect.y + rect.height * 0.04,
       width: rect.width - panelSideInset * 2,
       height: rect.height * 0.9
+    };
+  }
+
+  function leaderboardPanelRect(rect) {
+    const panelSideInset = 18;
+    return {
+      x: rect.x + panelSideInset,
+      y: rect.topInset + 72,
+      width: rect.width - panelSideInset * 2,
+      height: screenHeight - rect.topInset - 104
     };
   }
 
@@ -2253,6 +2694,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         );
         drawButton(context, currentButtons().find((button) => button.id === "play"), texts.play, true);
         drawButton(context, currentButtons().find((button) => button.id === "shop"), texts.shop, false);
+        drawButton(context, currentButtons().find((button) => button.id === "leaderboard"), texts.leaderboard, false);
       }
       if (overlay === "shop") {
         drawShopOverlay(context, rect);
@@ -2324,11 +2766,13 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       : overlay === "confirm-new-run" || overlay === "pause"
         ? 0.68
         : gameOverPanelHeightScale;
-    const panelSideInset = overlay === "daily-checkin" ? 18 : 24;
+    const panelSideInset = overlay === "daily-checkin" || overlay === "leaderboard" ? 18 : 24;
     const panel = overlay === "daily-checkin"
       ? checkInPanelRect(rect)
       : overlay === "heart-continue"
         ? heartContinuePanelRect(rect)
+        : overlay === "leaderboard"
+          ? leaderboardPanelRect(rect)
       : {
           x: rect.x + panelSideInset,
           y: rect.y + rect.height * panelYScale,
@@ -2358,6 +2802,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
               ? texts.useHeartTitle
               : overlay === "daily-checkin"
                 ? texts.dailyCheckIn
+                : overlay === "leaderboard"
+                  ? texts.leaderboard
                 : texts.runOver;
     context.fillText(
       overlayTitle,
@@ -2365,10 +2811,19 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       panel.y + 48
     );
 
-    if (overlay === "gameover" || overlay === "confirm-new-run") {
+    if (overlay === "gameover" || overlay === "confirm-new-run" || overlay === "leaderboard") {
       drawCloseButton(context, currentButtons().find((button) =>
-        button.id === (overlay === "gameover" ? "gameover-close" : "confirm-new-close")
+        button.id === (overlay === "gameover"
+          ? "gameover-close"
+          : overlay === "leaderboard"
+            ? "leaderboard-close"
+            : "confirm-new-close")
       ));
+    }
+
+    if (overlay === "leaderboard") {
+      drawLeaderboardOverlay(context, panel);
+      return;
     }
 
     if (overlay === "daily-checkin" && (pendingCheckIn?.reward || dailyRewardsView?.state)) {
@@ -2571,10 +3026,20 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       shopDragStartScrollY = shopScrollY;
       shopDragging = false;
     }
+    if (screen === "menu" && overlay === "leaderboard") {
+      leaderboardDragStartY = point.y;
+      leaderboardDragStartScrollY = leaderboardScrollY;
+      leaderboardDragging = false;
+    }
 
     const button = currentButtons().find((candidate) => hitTest(candidate, point));
     if (button) {
       touchStart = { point, buttonId: button.id };
+      return;
+    }
+
+    if (screen === "menu" && overlay === "leaderboard") {
+      touchStart = { point, buttonId: null };
       return;
     }
 
@@ -2603,6 +3068,34 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       return;
     }
 
+    if (screen === "menu" && overlay === "leaderboard" && touchStart) {
+      const point = getTouchPoint(event);
+      if (!point) {
+        return;
+      }
+
+      const panel = leaderboardPanelRect(canvasRect());
+      const metrics = leaderboardListMetrics(panel);
+      const board = createLeaderboard({
+        currentBestLevel: currentRecordLevel(),
+        boardType: LEADERBOARD_BOARD_TYPES.total
+      });
+      const listRows = board.rankedRows.filter((row) => !row.isCurrentUser).slice(3);
+      const contentHeight = listRows.length * metrics.rowHeight + Math.max(0, listRows.length - 1) * metrics.rowGap;
+      const maxScroll = Math.max(0, contentHeight - metrics.viewportHeight);
+      if (maxScroll <= 0) {
+        leaderboardScrollY = 0;
+        leaderboardDragging = false;
+        return;
+      }
+      const deltaY = point.y - leaderboardDragStartY;
+      if (Math.abs(deltaY) > 6) {
+        leaderboardDragging = true;
+      }
+      leaderboardScrollY = clamp(leaderboardDragStartScrollY - deltaY, 0, maxScroll);
+      return;
+    }
+
     if (!pointerActive) {
       return;
     }
@@ -2623,11 +3116,17 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     if (touchStart?.buttonId) {
       const button = currentButtons().find((candidate) => candidate.id === touchStart.buttonId);
-      if (button && hitTest(button, point) && !(screen === "menu" && overlay === "shop" && shopDragging)) {
+      if (
+        button &&
+        hitTest(button, point) &&
+        !(screen === "menu" && overlay === "shop" && shopDragging) &&
+        !(screen === "menu" && overlay === "leaderboard" && leaderboardDragging)
+      ) {
         handleButton(button.id);
       }
       touchStart = null;
       shopDragging = false;
+      leaderboardDragging = false;
       return;
     }
 
@@ -2650,6 +3149,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   wxApi.onTouchCancel(() => {
     pointerActive = false;
     touchStart = null;
+    leaderboardDragging = false;
   });
   wxApi.onHide?.(() => {
     persistProgress(true);
