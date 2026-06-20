@@ -31,6 +31,7 @@ const texts = {
   mainMenu: "主菜单",
   resume: "继续游戏",
   soundLabel: "音效",
+  vibrationLabel: "震动",
   soundOn: "开",
   soundOff: "关",
   done: "完成",
@@ -250,6 +251,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   const settings = storage.loadSettings();
   const audioBus = createAudioBus();
   audioBus.setEnabled(settings.soundEnabled);
+  let vibrationEnabled = settings.vibrationEnabled !== false;
   const tutorialAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/tap.png");
   const settingsIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/settings.png");
   const coinIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/dollar.png");
@@ -305,6 +307,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let lastClearVibrationAt = 0;
 
   function vibrateOnBrickClear() {
+    if (!vibrationEnabled) {
+      return;
+    }
+
     const now = Date.now();
     if (now - lastClearVibrationAt < 80) {
       return;
@@ -387,6 +393,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   function saveSettings() {
     storage.saveSettings({
       soundEnabled: audioBus.isEnabled(),
+      vibrationEnabled,
       language: "zh-CN"
     });
   }
@@ -1034,8 +1041,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
       if (overlay === "settings") {
         buttons.push(
-          { id: "toggle-sound", x: rect.x + rect.width - 166, y: rect.y + rect.height * 0.47, width: 106, height: 48 },
-          { id: "settings-done", x: rect.x + 60, y: rect.y + rect.height * 0.64, width: rect.width - 120, height: 52 }
+          { id: "toggle-sound", x: rect.x + rect.width - 166, y: rect.y + rect.height * 0.42, width: 106, height: 48 },
+          { id: "toggle-vibration", x: rect.x + rect.width - 166, y: rect.y + rect.height * 0.54, width: 106, height: 48 },
+          { id: "settings-done", x: rect.x + 60, y: rect.y + rect.height * 0.72, width: rect.width - 120, height: 52 }
         );
       }
 
@@ -1139,8 +1147,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     if (overlay === "settings") {
       buttons.push(
-        { id: "toggle-sound", x: rect.x + rect.width - 142, y: rect.y + rect.height * 0.46, width: 106, height: 48 },
-        { id: "settings-done", x: rect.x + 36, y: rect.y + rect.height * 0.62, width: rect.width - 72, height: 52 }
+        { id: "toggle-sound", x: rect.x + rect.width - 142, y: rect.y + rect.height * 0.42, width: 106, height: 48 },
+        { id: "toggle-vibration", x: rect.x + rect.width - 142, y: rect.y + rect.height * 0.53, width: 106, height: 48 },
+        { id: "settings-done", x: rect.x + 36, y: rect.y + rect.height * 0.68, width: rect.width - 72, height: 52 }
       );
     }
 
@@ -1264,6 +1273,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         break;
       case "toggle-sound":
         audioBus.setEnabled(!audioBus.isEnabled());
+        saveSettings();
+        break;
+      case "toggle-vibration":
+        vibrationEnabled = !vibrationEnabled;
         saveSettings();
         break;
       case "settings-done":
@@ -2886,12 +2899,14 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
 
     if (overlay === "settings") {
-      const toggleButton = currentButtons().find((button) => button.id === "toggle-sound");
+      const soundToggleButton = currentButtons().find((button) => button.id === "toggle-sound");
+      const vibrationToggleButton = currentButtons().find((button) => button.id === "toggle-vibration");
       context.fillStyle = "rgba(255,255,255,0.72)";
       context.font = "22px sans-serif";
       context.textAlign = "left";
       context.textBaseline = "middle";
-      context.fillText(texts.soundLabel, panel.x + 36, toggleButton.y + toggleButton.height / 2);
+      context.fillText(texts.soundLabel, panel.x + 36, soundToggleButton.y + soundToggleButton.height / 2);
+      context.fillText(texts.vibrationLabel, panel.x + 36, vibrationToggleButton.y + vibrationToggleButton.height / 2);
     }
 
     if (overlay === "gameover") {
@@ -2944,8 +2959,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         "daily-checkin-ok": pendingCheckIn?.reward ? texts.claim : texts.done
       };
 
-      if (button.id === "toggle-sound") {
-        drawToggle(context, button, audioBus.isEnabled());
+      if (button.id === "toggle-sound" || button.id === "toggle-vibration") {
+        drawToggle(context, button, button.id === "toggle-sound" ? audioBus.isEnabled() : vibrationEnabled);
         continue;
       }
 
