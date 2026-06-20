@@ -1068,9 +1068,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
           },
           {
             id: "settings-done",
-            x: settingsPanel.x + 36,
-            y: settingsPanel.y + settingsPanel.height - 76,
-            width: settingsPanel.width - 72,
+            x: settingsPanel.x + 52,
+            y: settingsPanel.y + settingsPanel.height - 88,
+            width: settingsPanel.width - 104,
             height: 52
           }
         );
@@ -1192,9 +1192,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         },
         {
           id: "settings-done",
-          x: settingsPanel.x + 36,
-          y: settingsPanel.y + settingsPanel.height - 76,
-          width: settingsPanel.width - 72,
+          x: settingsPanel.x + 52,
+          y: settingsPanel.y + settingsPanel.height - 88,
+          width: settingsPanel.width - 104,
           height: 52
         }
       );
