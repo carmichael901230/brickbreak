@@ -302,6 +302,21 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   const reviveSoundPlayer = createSoundPlayer(wxApi, "src/assets/sound/revive.mp3", {
     volume: 0.76
   });
+  let lastClearVibrationAt = 0;
+
+  function vibrateOnBrickClear() {
+    const now = Date.now();
+    if (now - lastClearVibrationAt < 80) {
+      return;
+    }
+
+    lastClearVibrationAt = now;
+    try {
+      wxApi.vibrateShort?.({ type: "light" });
+    } catch {
+      // Vibration is a small tactile flourish; gameplay should never depend on it.
+    }
+  }
 
   const boardGenerator = createBoardGenerator(GAME_CONFIG);
   const game = createGameController({
@@ -324,6 +339,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
     if (type === "revive") {
       reviveSoundPlayer.play();
+    }
+    if (type === "clear") {
+      vibrateOnBrickClear();
     }
   });
 
