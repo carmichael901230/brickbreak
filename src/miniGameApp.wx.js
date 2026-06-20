@@ -317,6 +317,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let overlay = null;
   let pointerActive = false;
   let bestScore = storage.loadBestScore();
+  let runStartBestScore = bestScore;
   let touchStart = null;
   let lastTime = Date.now();
   let tutorialIdleTime = 0;
@@ -473,6 +474,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       version: GAME_PROGRESS_VERSION,
       savedAt: Date.now(),
       continueUsedThisRun,
+      runStartBestScore,
       snapshot
     };
   }
@@ -633,6 +635,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     newRecordCheerPlayed = false;
     resetRecordConfetti();
     bestScore = Math.max(bestScore, storage.loadBestScore());
+    runStartBestScore = Number.isFinite(Number(progress.runStartBestScore))
+      ? Math.max(0, Math.floor(Number(progress.runStartBestScore)))
+      : bestScore;
     tutorialIdleTime = 0;
     tutorialDismissed = true;
     lastSavedProgressJson = JSON.stringify(progress);
@@ -659,6 +664,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
   function startRun() {
     clearSavedProgress();
+    bestScore = Math.max(bestScore, storage.loadBestScore());
+    runStartBestScore = bestScore;
     game.restart();
     hasStartedRun = true;
     continueUsedThisRun = false;
@@ -2673,7 +2680,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       game.update(deltaTime);
       if (game.getState().state === "gameover") {
         const finalState = game.getState();
-        const previousBestScore = bestScore;
+        const previousBestScore = runStartBestScore;
         const currentScore = Math.max(0, Math.floor(finalState.score));
         gameOverResult = {
           currentLevel: scoreToLevel(currentScore),
