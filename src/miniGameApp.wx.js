@@ -88,6 +88,16 @@ function heartContinuePanelRect(rect) {
   };
 }
 
+function settingsPanelRect(rect) {
+  const panelSideInset = 24;
+  return {
+    x: rect.x + panelSideInset,
+    y: rect.y + rect.height * 0.24,
+    width: rect.width - panelSideInset * 2,
+    height: rect.height * 0.54
+  };
+}
+
 function lerp(start, end, amount) {
   return start + (end - start) * amount;
 }
@@ -921,6 +931,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     };
     const heartPanel = heartContinuePanelRect(rect);
     const checkInPanel = checkInPanelRect(rect);
+    const settingsPanel = settingsPanelRect(rect);
     const pausePanel = {
       x: rect.x + 24,
       y: rect.y + rect.height * 0.16,
@@ -1041,9 +1052,27 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
       if (overlay === "settings") {
         buttons.push(
-          { id: "toggle-sound", x: rect.x + rect.width - 166, y: rect.y + rect.height * 0.42, width: 106, height: 48 },
-          { id: "toggle-vibration", x: rect.x + rect.width - 166, y: rect.y + rect.height * 0.54, width: 106, height: 48 },
-          { id: "settings-done", x: rect.x + 60, y: rect.y + rect.height * 0.72, width: rect.width - 120, height: 52 }
+          {
+            id: "toggle-sound",
+            x: settingsPanel.x + settingsPanel.width - 142,
+            y: settingsPanel.y + 92,
+            width: 106,
+            height: 48
+          },
+          {
+            id: "toggle-vibration",
+            x: settingsPanel.x + settingsPanel.width - 142,
+            y: settingsPanel.y + 164,
+            width: 106,
+            height: 48
+          },
+          {
+            id: "settings-done",
+            x: settingsPanel.x + 36,
+            y: settingsPanel.y + settingsPanel.height - 76,
+            width: settingsPanel.width - 72,
+            height: 52
+          }
         );
       }
 
@@ -1147,9 +1176,27 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     if (overlay === "settings") {
       buttons.push(
-        { id: "toggle-sound", x: rect.x + rect.width - 142, y: rect.y + rect.height * 0.42, width: 106, height: 48 },
-        { id: "toggle-vibration", x: rect.x + rect.width - 142, y: rect.y + rect.height * 0.53, width: 106, height: 48 },
-        { id: "settings-done", x: rect.x + 36, y: rect.y + rect.height * 0.68, width: rect.width - 72, height: 52 }
+        {
+          id: "toggle-sound",
+          x: settingsPanel.x + settingsPanel.width - 142,
+          y: settingsPanel.y + 92,
+          width: 106,
+          height: 48
+        },
+        {
+          id: "toggle-vibration",
+          x: settingsPanel.x + settingsPanel.width - 142,
+          y: settingsPanel.y + 164,
+          width: 106,
+          height: 48
+        },
+        {
+          id: "settings-done",
+          x: settingsPanel.x + 36,
+          y: settingsPanel.y + settingsPanel.height - 76,
+          width: settingsPanel.width - 72,
+          height: 52
+        }
       );
     }
 
@@ -2804,6 +2851,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         ? heartContinuePanelRect(rect)
         : overlay === "leaderboard"
           ? leaderboardPanelRect(rect)
+          : overlay === "settings"
+            ? settingsPanelRect(rect)
       : {
           x: rect.x + panelSideInset,
           y: rect.y + rect.height * panelYScale,
