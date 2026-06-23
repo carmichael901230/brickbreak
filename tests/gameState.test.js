@@ -71,6 +71,31 @@ test("game state snapshot can be exported and restored", () => {
   assert.equal(restored.getState().bestScore, 7);
 });
 
+test("clearLowestBlockRows removes only the lowest occupied block rows", () => {
+  const game = createGameController({
+    boardGenerator: createBoardGenerator([{ blocks: [], pickups: [], coins: [] }]),
+    audioBus: createAudioBus()
+  });
+  const state = game.getState();
+  state.blocks = [
+    { id: "top", row: 0, column: 0, hp: 1 },
+    { id: "middle", row: 3, column: 1, hp: 1 },
+    { id: "low-a", row: 6, column: 2, hp: 1 },
+    { id: "low-b", row: 7, column: 3, hp: 1 },
+    { id: "lowest", row: 8, column: 4, hp: 1 }
+  ];
+  state.pickups = [{ id: "p1", row: 8, column: 0, collected: false }];
+  state.coinsOnBoard = [{ id: "c1", row: 7, column: 6, collected: false }];
+
+  const result = game.clearLowestBlockRows(3);
+
+  assert.deepEqual(result.clearedRows, [8, 7, 6]);
+  assert.deepEqual(state.blocks.map((block) => block.id), ["top", "middle"]);
+  assert.deepEqual(state.pickups.map((pickup) => pickup.id), ["p1"]);
+  assert.deepEqual(state.coinsOnBoard.map((coin) => coin.id), ["c1"]);
+  assert.equal(result.removedBlocks.length, 3);
+});
+
 test("low launch angles hide the guide and do not fire", () => {
   const game = createGameController({
     boardGenerator: createBoardGenerator([

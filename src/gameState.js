@@ -511,6 +511,48 @@ export function createGameController({
     gameState.blocks = gameState.blocks.filter((block) => block.id !== blockId);
   }
 
+  function clearLowestBlockRows(rowCount = 3) {
+    if (gameState.state === "gameover") {
+      return { clearedRows: [], removedBlocks: [] };
+    }
+
+    const normalizedRowCount = Math.max(0, Math.floor(rowCount));
+    if (normalizedRowCount <= 0) {
+      return { clearedRows: [], removedBlocks: [] };
+    }
+
+    const clearedRows = Array.from(new Set(gameState.blocks.map((block) => block.row)))
+      .sort((a, b) => b - a)
+      .slice(0, normalizedRowCount);
+    const clearedRowSet = new Set(clearedRows);
+    const removedBlocks = gameState.blocks
+      .filter((block) => clearedRowSet.has(block.row))
+      .map((block) => {
+        const position = getEntityPosition(gameState.arena, config, block);
+        return {
+          block: cloneSerializable(block),
+          x: position.x,
+          y: position.y,
+          size: gameState.arena.blockSize
+        };
+      });
+
+    if (removedBlocks.length === 0) {
+      return { clearedRows: [], removedBlocks: [] };
+    }
+
+    gameState.blocks = gameState.blocks.filter((block) => !clearedRowSet.has(block.row));
+    for (const removed of removedBlocks) {
+      addParticle(removed.x + removed.size / 2, removed.y + removed.size / 2, "clear");
+    }
+    audioBus.emit("clearRows", {
+      rows: clearedRows,
+      count: removedBlocks.length
+    });
+
+    return { clearedRows, removedBlocks };
+  }
+
   function updateBall(ball, deltaTime) {
     if (!ball.active || ball.returned) {
       return;
@@ -719,6 +761,7 @@ export function createGameController({
 
   return {
     activateSpeedUp,
+    clearLowestBlockRows,
     consumeHeartContinue,
     continueFromGameOver,
     exportSnapshot,

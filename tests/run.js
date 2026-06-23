@@ -212,6 +212,14 @@ test("storage adapter persists and loads hearts", () => {
   assert.equal(adapter.loadHearts(), 3);
 });
 
+test("storage adapter persists clear free item usage", () => {
+  const storage = createMemoryStorage();
+  const adapter = createStorageAdapter(storage);
+  assert.equal(adapter.loadClearFreeUsed(), false);
+  adapter.saveClearFreeUsed(true);
+  assert.equal(adapter.loadClearFreeUsed(), true);
+});
+
 test("storage adapter persists and loads daily check-in state", () => {
   const storage = createMemoryStorage();
   const adapter = createStorageAdapter(storage);
@@ -377,6 +385,31 @@ test("coins are collected on contact and emit a coin event", () => {
   assert.equal(game.getState().coins, 1);
   assert.equal(game.getState().coinsOnBoard[0].collected, true);
   assert.equal(audioBus.events.some((event) => event.type === "coin"), true);
+});
+
+test("clearLowestBlockRows removes only the lowest occupied block rows", () => {
+  const game = createGameController({
+    boardGenerator: createRoundSequence([{ blocks: [], pickups: [], coins: [] }]),
+    audioBus: createSilentAudioBus()
+  });
+  const state = game.getState();
+  state.blocks = [
+    { id: "top", row: 0, column: 0, hp: 1 },
+    { id: "middle", row: 3, column: 1, hp: 1 },
+    { id: "low-a", row: 6, column: 2, hp: 1 },
+    { id: "low-b", row: 7, column: 3, hp: 1 },
+    { id: "lowest", row: 8, column: 4, hp: 1 }
+  ];
+  state.pickups = [{ id: "p1", row: 8, column: 0, collected: false }];
+  state.coinsOnBoard = [{ id: "c1", row: 7, column: 6, collected: false }];
+
+  const result = game.clearLowestBlockRows(3);
+
+  assert.deepEqual(result.clearedRows, [8, 7, 6]);
+  assert.deepEqual(state.blocks.map((block) => block.id), ["top", "middle"]);
+  assert.deepEqual(state.pickups.map((pickup) => pickup.id), ["p1"]);
+  assert.deepEqual(state.coinsOnBoard.map((coin) => coin.id), ["c1"]);
+  assert.equal(result.removedBlocks.length, 3);
 });
 
 test("heart count is persistent and restart preserves it", () => {

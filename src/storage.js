@@ -170,6 +170,22 @@ export function createStorageAdapter(storage = globalThis.localStorage) {
       storage.setItem(STORAGE_KEYS.dailyCheckIn, JSON.stringify(normalizeCheckIn(checkIn)));
     },
 
+    loadClearFreeUsed() {
+      if (!storage) {
+        return false;
+      }
+
+      return storage.getItem(STORAGE_KEYS.clearFreeUsed) === "true";
+    },
+
+    saveClearFreeUsed(used) {
+      if (!storage) {
+        return;
+      }
+
+      storage.setItem(STORAGE_KEYS.clearFreeUsed, used ? "true" : "false");
+    },
+
     clearGameProgress() {
       if (!storage) {
         return;

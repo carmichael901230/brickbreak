@@ -55,6 +55,16 @@ const texts = {
   myRank: "我的排名",
   rankPosition: (rank) => `第 ${rank} 名`,
   currentUser: "我",
+  clearThreeRows: "消三行",
+  clearPromptTitle: "提示",
+  clearPromptDescription: "将清除最下面 3 行砖块，帮你缓解底部压力。",
+  clearConfirm: "确认清除",
+  clearAdConfirm: "看广告获取",
+  clearLimitDescription: "每局最多使用 3 次清除功能，下一局可重新使用。",
+  clearNoBlocks: "暂无可清除的砖块",
+  clearAdLoading: "广告加载中",
+  clearAdFailed: "广告暂时不可用，请稍后再试",
+  clearAdRewarded: "已获得 1 个清除道具",
   claim: "领取",
   newRecord: "新纪录",
   brokePreviousRecord: (level) => `你已突破之前的第 ${level} 关纪录`,
@@ -68,6 +78,12 @@ const texts = {
 const HEART_CONTINUE_PANEL_Y_SCALE = 0.23;
 const HEART_CONTINUE_PANEL_MIN_HEIGHT = 230;
 const HEART_CONTINUE_PANEL_MAX_HEIGHT = 252;
+const CLEAR_TOOL_MAX_USES_PER_RUN = 3;
+const CLEAR_TOOL_ROWS = 3;
+const CLEAR_TOOL_AD_UNIT_ID = "adunit-fce0dbb1a75742d4";
+const ITEM_TRAY_HEIGHT = 86;
+const ITEM_TRAY_GAP = 8;
+const CLEAR_ANIMATION_DURATION = 550;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -95,6 +111,17 @@ function settingsPanelRect(rect) {
     y: rect.y + rect.height * 0.24,
     width: rect.width - panelSideInset * 2,
     height: rect.height * 0.58
+  };
+}
+
+function clearToolPanelRect(rect) {
+  const panelSideInset = 24;
+  const panelHeight = clamp(rect.height * 0.46, 292, 328);
+  return {
+    x: rect.x + panelSideInset,
+    y: rect.y + rect.height * 0.22,
+    width: rect.width - panelSideInset * 2,
+    height: panelHeight
   };
 }
 
@@ -270,6 +297,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   const trophyIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/trophy.png");
   const confettiIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/confetti.png");
   const dailyRewardsIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/gift-box.png");
+  const clearLinesIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/clear-lines.png");
+  const adVideoIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/ad-video.png");
   const leaderboardAvatarAssets = Object.fromEntries(
     FAKE_LEADERBOARD_USERS.map((user) => [user.avatar, loadImageAsset(wxApi, canvas, user.avatar)])
   );
@@ -313,6 +342,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   });
   const reviveSoundPlayer = createSoundPlayer(wxApi, "src/assets/sound/revive.mp3", {
     volume: 0.76
+  });
+  const rewardedVideoAd = wxApi.createRewardedVideoAd?.({
+    adUnitId: CLEAR_TOOL_AD_UNIT_ID
   });
   let lastClearVibrationAt = 0;
 
@@ -392,6 +424,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let leaderboardDragStartY = 0;
   let leaderboardDragStartScrollY = 0;
   let leaderboardDragging = false;
+  let clearFreeItemAvailable = storage.loadClearFreeUsed() !== true;
+  let clearAdItemsThisRun = 0;
+  let clearUsesThisRun = 0;
+  let clearToolMessage = "";
+  let clearToolAnimation = null;
+  let clearAdLoading = false;
   let pendingCheckIn = null;
   let dailyRewardsView = null;
   let dailyClaimAnimation = null;
@@ -414,7 +452,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     const horizontalPadding = clamp(screenWidth * 0.035, 12, 18);
     const hudHeight = clamp(screenHeight * 0.14, 88, 132);
     const boardTop = topInset + hudHeight;
-    const boardBottom = screenHeight - bottomInset;
+    const boardBottom = screenHeight - bottomInset - ITEM_TRAY_HEIGHT;
     const boardHeight = Math.max(160, boardBottom - boardTop);
     const boardWidth = Math.min(
       screenWidth - horizontalPadding * 2,
@@ -427,6 +465,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       width: boardWidth,
       height: boardWidth * (GAME_CONFIG.height / GAME_CONFIG.width),
       topInset,
+      bottomInset,
       horizontalPadding
     };
   }
@@ -527,6 +566,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       savedAt: Date.now(),
       continueUsedThisRun,
       runStartBestScore,
+      clearFreeItemAvailable,
+      clearAdItemsThisRun,
+      clearUsesThisRun,
       snapshot
     };
   }
@@ -576,6 +618,137 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     return loadSavedProgress() !== null;
   }
+
+  function itemTrayRect(rect) {
+    const top = rect.y + rect.height + ITEM_TRAY_GAP;
+    const bottom = screenHeight - rect.bottomInset;
+    return {
+      x: rect.x,
+      y: top,
+      width: rect.width,
+      height: Math.max(0, bottom - top)
+    };
+  }
+
+  function clearToolInventoryCount() {
+    return (clearFreeItemAvailable ? 1 : 0) + clearAdItemsThisRun;
+  }
+
+  function clearToolButtonRect(rect) {
+    const tray = itemTrayRect(rect);
+    const size = clamp(Math.min(tray.height, 72), 58, 72);
+    return {
+      id: "clear-tool",
+      x: tray.x + 12,
+      y: tray.y + Math.max(0, (tray.height - size) / 2),
+      width: size,
+      height: size
+    };
+  }
+
+  function clearToolPanelMode() {
+    if (clearUsesThisRun >= CLEAR_TOOL_MAX_USES_PER_RUN) {
+      return "limit";
+    }
+    return clearToolInventoryCount() > 0 ? "use" : "ad";
+  }
+
+  function openClearToolPanel() {
+    if (clearToolAnimation) {
+      return;
+    }
+
+    clearToolMessage = "";
+    overlay = "clear-tool";
+  }
+
+  function consumeClearToolItem() {
+    if (clearFreeItemAvailable) {
+      clearFreeItemAvailable = false;
+      storage.saveClearFreeUsed(true);
+      return true;
+    }
+
+    if (clearAdItemsThisRun > 0) {
+      clearAdItemsThisRun -= 1;
+      return true;
+    }
+
+    return false;
+  }
+
+  function startClearToolAnimation(removedBlocks) {
+    clearToolAnimation = {
+      startedAt: Date.now(),
+      duration: CLEAR_ANIMATION_DURATION,
+      removedBlocks: removedBlocks.map((removed, index) => ({
+        ...removed,
+        angle: (index * 1.37) % (Math.PI * 2),
+        drift: 18 + (index % 5) * 7
+      }))
+    };
+  }
+
+  function confirmClearToolUse() {
+    if (clearToolPanelMode() !== "use") {
+      requestClearToolAd();
+      return;
+    }
+
+    if (game.getState().blocks.length === 0) {
+      clearToolMessage = texts.clearNoBlocks;
+      return;
+    }
+
+    if (!consumeClearToolItem()) {
+      clearToolMessage = "";
+      return;
+    }
+
+    clearUsesThisRun = Math.min(CLEAR_TOOL_MAX_USES_PER_RUN, clearUsesThisRun + 1);
+    const result = game.clearLowestBlockRows(CLEAR_TOOL_ROWS);
+    startClearToolAnimation(result.removedBlocks);
+    overlay = null;
+    persistProgress(true);
+  }
+
+  function requestClearToolAd() {
+    if (clearAdLoading || clearUsesThisRun >= CLEAR_TOOL_MAX_USES_PER_RUN) {
+      return;
+    }
+
+    if (!rewardedVideoAd) {
+      clearToolMessage = texts.clearAdFailed;
+      return;
+    }
+
+    clearAdLoading = true;
+    clearToolMessage = texts.clearAdLoading;
+    const showAd = () => rewardedVideoAd.show?.();
+    Promise.resolve()
+      .then(showAd)
+      .catch(() => Promise.resolve(rewardedVideoAd.load?.()).then(() => rewardedVideoAd.show?.()))
+      .catch(() => {
+        clearAdLoading = false;
+        clearToolMessage = texts.clearAdFailed;
+      });
+  }
+
+  rewardedVideoAd?.onClose?.((result) => {
+    clearAdLoading = false;
+    if (result?.isEnded === true || result === undefined) {
+      clearAdItemsThisRun += 1;
+      clearToolMessage = texts.clearAdRewarded;
+      persistProgress(true);
+      return;
+    }
+
+    clearToolMessage = "";
+  });
+  rewardedVideoAd?.onError?.(() => {
+    clearAdLoading = false;
+    clearToolMessage = texts.clearAdFailed;
+  });
 
   function currentRecordLevel() {
     return Math.max(1, Math.floor(bestScore) + 1);
@@ -683,6 +856,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     overlay = "pause";
     hasStartedRun = true;
     continueUsedThisRun = progress.continueUsedThisRun === true;
+    clearFreeItemAvailable = progress.clearFreeItemAvailable !== false && storage.loadClearFreeUsed() !== true;
+    clearAdItemsThisRun = Math.max(0, Math.floor(Number(progress.clearAdItemsThisRun) || 0));
+    clearUsesThisRun = Math.max(0, Math.floor(Number(progress.clearUsesThisRun) || 0));
+    clearToolMessage = "";
+    clearToolAnimation = null;
+    clearAdLoading = false;
     gameOverResult = null;
     newRecordCheerPlayed = false;
     resetRecordConfetti();
@@ -718,6 +897,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     clearSavedProgress();
     bestScore = Math.max(bestScore, storage.loadBestScore());
     runStartBestScore = bestScore;
+    clearFreeItemAvailable = storage.loadClearFreeUsed() !== true;
+    clearAdItemsThisRun = 0;
+    clearUsesThisRun = 0;
+    clearToolMessage = "";
+    clearToolAnimation = null;
+    clearAdLoading = false;
     game.restart();
     hasStartedRun = true;
     continueUsedThisRun = false;
@@ -932,6 +1117,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     const heartPanel = heartContinuePanelRect(rect);
     const checkInPanel = checkInPanelRect(rect);
     const settingsPanel = settingsPanelRect(rect);
+    const clearToolPanel = clearToolPanelRect(rect);
     const pausePanel = {
       x: rect.x + 24,
       y: rect.y + rect.height * 0.16,
@@ -1159,6 +1345,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       });
     }
 
+    if (overlay === null && game.getState().state !== "gameover") {
+      buttons.push(clearToolButtonRect(rect));
+    }
+
     if (overlay === "pause") {
       const buttonHeight = 52;
       const contentTop = pausePanel.y + 82;
@@ -1198,6 +1388,26 @@ export function bootMiniGame(wxApi = globalThis.wx) {
           height: 52
         }
       );
+    }
+
+    if (overlay === "clear-tool") {
+      buttons.push({
+        id: "clear-tool-close",
+        x: clearToolPanel.x + clearToolPanel.width - 44,
+        y: clearToolPanel.y + 20,
+        width: 24,
+        height: 24
+      });
+
+      if (clearToolPanelMode() !== "limit") {
+        buttons.push({
+          id: "clear-tool-confirm",
+          x: clearToolPanel.x + 32,
+          y: clearToolPanel.y + clearToolPanel.height - 76,
+          width: clearToolPanel.width - 64,
+          height: 52
+        });
+      }
     }
 
     if (overlay === "gameover") {
@@ -1309,6 +1519,17 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         break;
       case "speed":
         game.activateSpeedUp();
+        break;
+      case "clear-tool":
+        openClearToolPanel();
+        break;
+      case "clear-tool-close":
+        clearAdLoading = false;
+        clearToolMessage = "";
+        overlay = null;
+        break;
+      case "clear-tool-confirm":
+        confirmClearToolUse();
         break;
       case "resume":
         overlay = null;
@@ -2535,6 +2756,177 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     drawHeartCounter(context, screenWidth - rect.horizontalPadding, rect.topInset + 78, state.heartCount);
   }
 
+  function drawClearToolButton(context, rect) {
+    const button = currentButtons().find((candidate) => candidate.id === "clear-tool");
+    if (!button) {
+      return;
+    }
+
+    const count = clearToolInventoryCount();
+    const disabled = clearToolAnimation || clearUsesThisRun >= CLEAR_TOOL_MAX_USES_PER_RUN;
+    const tray = itemTrayRect(rect);
+    context.save();
+    roundedRect(context, tray.x, tray.y, tray.width, tray.height, 18);
+    context.fillStyle = "rgba(10,15,35,0.22)";
+    context.fill();
+
+    roundedRect(context, button.x, button.y, button.width, button.height, 16);
+    context.fillStyle = disabled ? "rgba(255,255,255,0.1)" : "rgba(250,204,21,0.18)";
+    context.fill();
+    context.strokeStyle = count > 0 ? "rgba(250,204,21,0.78)" : "rgba(255,255,255,0.18)";
+    context.lineWidth = 2;
+    context.stroke();
+
+    const iconSize = button.width * 0.58;
+    const iconX = button.x + (button.width - iconSize) / 2;
+    const iconY = button.y + 7;
+    context.globalAlpha = disabled ? 0.45 : 1;
+    if (clearLinesIconAsset.loaded && clearLinesIconAsset.image) {
+      context.drawImage(clearLinesIconAsset.image, iconX, iconY, iconSize, iconSize);
+    } else {
+      context.fillStyle = "#facc15";
+      roundedRect(context, iconX, iconY + iconSize * 0.45, iconSize, iconSize * 0.32, 6);
+      context.fill();
+      context.fillStyle = "#ef4444";
+      context.fillRect(iconX + 4, iconY + iconSize * 0.48, iconSize - 8, 5);
+      context.fillStyle = "#38bdf8";
+      context.fillRect(iconX + 4, iconY + iconSize * 0.62, iconSize - 8, 5);
+    }
+    context.globalAlpha = 1;
+
+    context.fillStyle = disabled ? "rgba(255,255,255,0.45)" : "#fbfbfb";
+    context.font = "800 12px sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "alphabetic";
+    context.fillText(texts.clearThreeRows, button.x + button.width / 2, button.y + button.height - 8);
+
+    roundedRect(context, button.x + button.width - 33, button.y - 8, 40, 28, 14);
+    context.fillStyle = count > 0 ? "#22c55e" : "rgba(255,255,255,0.16)";
+    context.fill();
+    context.fillStyle = count > 0 ? "#052e16" : "rgba(255,255,255,0.72)";
+    context.font = "900 16px sans-serif";
+    context.textBaseline = "middle";
+    context.fillText(`x${count}`, button.x + button.width - 13, button.y + 6);
+    context.restore();
+  }
+
+  function drawClearToolPanel(context, panel) {
+    const mode = clearToolPanelMode();
+    const confirmButton = currentButtons().find((button) => button.id === "clear-tool-confirm");
+    const iconSize = 38;
+    const centerX = panel.x + panel.width / 2;
+    const iconY = panel.y + 66;
+
+    if (clearLinesIconAsset.loaded && clearLinesIconAsset.image) {
+      context.drawImage(clearLinesIconAsset.image, centerX - iconSize / 2, iconY, iconSize, iconSize);
+    }
+
+    context.fillStyle = "rgba(255,255,255,0.82)";
+    context.font = "16px sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "alphabetic";
+    const lines = mode === "limit"
+      ? ["每局最多使用 3 次清除功能，", "下一局可重新使用。"]
+      : ["将清除最下面 3 行砖块，", "帮你缓解底部压力。"];
+    for (let index = 0; index < lines.length; index += 1) {
+      context.fillText(lines[index], centerX, panel.y + 132 + index * 24);
+    }
+
+    if (clearToolMessage) {
+      context.fillStyle = clearToolMessage === texts.clearAdFailed ? "#fca5a5" : "#facc15";
+      context.font = "700 14px sans-serif";
+      context.fillText(clearToolMessage, centerX, confirmButton ? confirmButton.y - 16 : panel.y + panel.height - 42);
+    }
+
+    if (confirmButton) {
+      drawButton(
+        context,
+        confirmButton,
+        mode === "ad" ? texts.clearAdConfirm : texts.clearConfirm,
+        true
+      );
+      if (mode === "ad" && adVideoIconAsset.loaded && adVideoIconAsset.image) {
+        const iconButtonSize = 22;
+        context.drawImage(
+          adVideoIconAsset.image,
+          confirmButton.x + 20,
+          confirmButton.y + (confirmButton.height - iconButtonSize) / 2,
+          iconButtonSize,
+          iconButtonSize
+        );
+      }
+    }
+  }
+
+  function drawClearToolAnimation(context, rect) {
+    if (!clearToolAnimation) {
+      return;
+    }
+
+    const elapsed = Date.now() - clearToolAnimation.startedAt;
+    const progress = clamp(elapsed / clearToolAnimation.duration, 0, 1);
+    if (progress >= 1) {
+      clearToolAnimation = null;
+      return;
+    }
+
+    context.save();
+    context.translate(rect.x, rect.y);
+    const pulse = Math.sin(clamp(progress / 0.22, 0, 1) * Math.PI);
+    for (const removed of clearToolAnimation.removedBlocks) {
+      const scaleX = rect.width / GAME_CONFIG.width;
+      const scaleY = rect.height / GAME_CONFIG.height;
+      const x = removed.x * scaleX;
+      const y = removed.y * scaleY;
+      const size = removed.size * scaleX;
+
+      if (progress < 0.25) {
+        roundedRect(context, x - 5 * pulse, y - 5 * pulse, size + 10 * pulse, size + 10 * pulse, 8);
+        context.strokeStyle = `rgba(250,204,21,${0.25 + pulse * 0.55})`;
+        context.lineWidth = 2 + pulse * 2;
+        context.stroke();
+      }
+
+      const burst = clamp((progress - 0.18) / 0.58, 0, 1);
+      const alpha = Math.max(0, 1 - burst);
+      if (burst > 0 && alpha > 0) {
+        context.globalAlpha = alpha;
+        context.fillStyle = removed.block?.column % 2 === 0 ? "#facc15" : "#fb923c";
+        for (let index = 0; index < 4; index += 1) {
+          const angle = removed.angle + index * Math.PI * 0.5;
+          const drift = removed.drift * burst;
+          context.fillRect(
+            x + size / 2 + Math.cos(angle) * drift - 4,
+            y + size / 2 + Math.sin(angle) * drift - 18 * burst - 4,
+            8,
+            8
+          );
+        }
+        context.globalAlpha = 1;
+      }
+    }
+
+    const sweep = clamp((progress - 0.68) / 0.28, 0, 1);
+    if (sweep > 0 && sweep < 1) {
+      const sweepYValues = clearToolAnimation.removedBlocks.map((removed) => removed.y * (rect.height / GAME_CONFIG.height));
+      const minY = Math.min(...sweepYValues);
+      const maxY = Math.max(...sweepYValues);
+      const y = lerp(minY, maxY, sweep);
+      const gradient = context.createLinearGradient(0, y, rect.width, y);
+      gradient.addColorStop(0, "rgba(250,204,21,0)");
+      gradient.addColorStop(0.5, "rgba(255,255,255,0.82)");
+      gradient.addColorStop(1, "rgba(250,204,21,0)");
+      context.strokeStyle = gradient;
+      context.lineWidth = 5;
+      context.beginPath();
+      context.moveTo(0, y);
+      context.lineTo(rect.width, y);
+      context.stroke();
+    }
+
+    context.restore();
+  }
+
   function drawColoredTitle(context, x, y) {
     const colors = ["#ef4444", "#facc15", "#3b82f6", "#22c55e"];
     const characters = Array.from(texts.title);
@@ -2816,6 +3208,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         drawButton(context, speedButton, texts.speed);
       }
 
+      drawClearToolButton(context, rect);
+      drawClearToolAnimation(context, rect);
+
       if (shouldShowTutorial(state)) {
         drawTutorialHint(context, rect);
       }
@@ -2853,6 +3248,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
           ? leaderboardPanelRect(rect)
           : overlay === "settings"
             ? settingsPanelRect(rect)
+            : overlay === "clear-tool"
+              ? clearToolPanelRect(rect)
       : {
           x: rect.x + panelSideInset,
           y: rect.y + rect.height * panelYScale,
@@ -2884,25 +3281,34 @@ export function bootMiniGame(wxApi = globalThis.wx) {
                 ? texts.dailyCheckIn
                 : overlay === "leaderboard"
                   ? texts.leaderboard
-                : texts.runOver;
+                  : overlay === "clear-tool"
+                    ? texts.clearPromptTitle
+                    : texts.runOver;
     context.fillText(
       overlayTitle,
       screenWidth / 2,
       panel.y + 48
     );
 
-    if (overlay === "gameover" || overlay === "confirm-new-run" || overlay === "leaderboard") {
+    if (overlay === "gameover" || overlay === "confirm-new-run" || overlay === "leaderboard" || overlay === "clear-tool") {
       drawCloseButton(context, currentButtons().find((button) =>
         button.id === (overlay === "gameover"
           ? "gameover-close"
           : overlay === "leaderboard"
             ? "leaderboard-close"
-            : "confirm-new-close")
+            : overlay === "clear-tool"
+              ? "clear-tool-close"
+              : "confirm-new-close")
       ));
     }
 
     if (overlay === "leaderboard") {
       drawLeaderboardOverlay(context, panel);
+      return;
+    }
+
+    if (overlay === "clear-tool") {
+      drawClearToolPanel(context, panel);
       return;
     }
 

@@ -51,6 +51,14 @@ test("storage adapter persists and loads hearts", () => {
   assert.equal(adapter.loadHearts(), 3);
 });
 
+test("storage adapter persists clear free item usage", () => {
+  const storage = createMemoryStorage();
+  const adapter = createStorageAdapter(storage);
+  assert.equal(adapter.loadClearFreeUsed(), false);
+  adapter.saveClearFreeUsed(true);
+  assert.equal(adapter.loadClearFreeUsed(), true);
+});
+
 test("storage adapter persists and loads daily check-in state", () => {
   const storage = createMemoryStorage();
   const adapter = createStorageAdapter(storage);
