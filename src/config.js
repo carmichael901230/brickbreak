@@ -27,7 +27,7 @@ export const GAME_CONFIG = {
     blockChanceRamp: 0.025,
     pickupChance: 0.72,
     guaranteedPickupRounds: 2,
-    coinChance: 0.35
+    coinChance: 0.2
   },
   effects: {
     hitFlashTime: 0.12,

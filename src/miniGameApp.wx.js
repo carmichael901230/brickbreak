@@ -36,9 +36,9 @@ const texts = {
   soundOff: "关",
   done: "完成",
   reachedRound: (round) => `你打到了第 ${round} 回合`,
-  shareContinue: "分享复活",
+  shareContinue: "看广告复活",
   shareContinueHintOne: "球球还没放弃！",
-  shareContinueHintTwo: "分享到微信群立即复活 +1",
+  shareContinueHintTwo: "观看完整广告，立即复活继续挑战",
   shareContinueHintThree: "继续冲击更高分!",
   useHeartTitle: "使用爱心复活？",
   useHeartHint: "消耗 1 个爱心，继续挑战本局。",
@@ -78,9 +78,10 @@ const texts = {
 const HEART_CONTINUE_PANEL_Y_SCALE = 0.23;
 const HEART_CONTINUE_PANEL_MIN_HEIGHT = 230;
 const HEART_CONTINUE_PANEL_MAX_HEIGHT = 252;
-const DOUBLE_COINS_AD_TEXT = "\u770b\u5e7f\u544a\u7ffb\u500d";
-const DOUBLE_COINS_AD_LOADING_TEXT = "\u5e7f\u544a\u52a0\u8f7d\u4e2d";
-const DOUBLE_COINS_AD_FAILED_TEXT = "\u5e7f\u544a\u6682\u65f6\u4e0d\u53ef\u7528\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5";
+const DOUBLE_COINS_SHARE_TEXT = "分享游戏翻倍";
+const DOUBLE_COINS_SHARE_FAILED_TEXT = "分享暂时不可用，请稍后再试";
+const REVIVE_AD_LOADING_TEXT = "广告加载中";
+const REVIVE_AD_FAILED_TEXT = "广告暂时不可用，请稍后再试";
 const CLEAR_TOOL_MAX_USES_PER_RUN = 3;
 const CLEAR_TOOL_ROWS = 3;
 const CLEAR_TOOL_AD_UNIT_ID = "adunit-fce0dbb1a75742d4";
@@ -334,6 +335,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   const dailyRewardsIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/gift-box.png");
   const clearLinesIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/clear-lines.png");
   const adVideoIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/ad-video.png");
+  const shareIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/share.png");
   const leaderboardAvatarAssets = Object.fromEntries(
     FAKE_LEADERBOARD_USERS.map((user) => [user.avatar, loadImageAsset(wxApi, canvas, user.avatar)])
   );
@@ -477,9 +479,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let clearToolDemoStartedAt = 0;
   let clearAdLoading = false;
   let rewardedAdPurpose = null;
-  let doubleCoinAdLoading = false;
+  let reviveAdLoading = false;
   let doubleCoinMessage = "";
   let coinDoubleAnimation = null;
+  let pendingDoubleCoinShare = null;
   let pendingCheckIn = null;
   let dailyRewardsView = null;
   let dailyClaimAnimation = null;
@@ -793,22 +796,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     rewardedAdPurpose = null;
     const completed = result?.isEnded === true || result === undefined;
 
-    if (purpose === "double-coins") {
-      doubleCoinAdLoading = false;
+    if (purpose === "revive") {
+      reviveAdLoading = false;
       if (completed) {
-        const amount = Math.max(0, Math.floor(gameOverResult?.coinsEarned || 0));
-        if (amount > 0 && gameOverResult && gameOverResult.coinDoubled !== true) {
-          const rewardButton = currentButtons().find((button) => button.id === "double-coins-ad");
-          gameOverResult.coinDoubled = true;
-          doubleCoinMessage = "";
-          coinDoubleAnimation = {
-            amount,
-            startedAt: Date.now(),
-            duration: 1050,
-            sourceX: rewardButton ? rewardButton.x + rewardButton.width / 2 : screenWidth / 2,
-            sourceY: rewardButton ? rewardButton.y + rewardButton.height / 2 : screenHeight * 0.68
-          };
-        }
+        completeAdRevive();
       } else {
         doubleCoinMessage = "";
       }
@@ -828,43 +819,70 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   rewardedVideoAd?.onError?.(() => {
     const purpose = rewardedAdPurpose;
     rewardedAdPurpose = null;
-    if (purpose === "double-coins") {
-      doubleCoinAdLoading = false;
-      doubleCoinMessage = DOUBLE_COINS_AD_FAILED_TEXT;
+    if (purpose === "revive") {
+      reviveAdLoading = false;
+      doubleCoinMessage = REVIVE_AD_FAILED_TEXT;
       return;
     }
     clearAdLoading = false;
     clearToolMessage = texts.clearAdFailed;
   });
 
-  function requestDoubleCoinAd() {
-    const amount = Math.max(0, Math.floor(gameOverResult?.coinsEarned || 0));
+  function requestReviveAd() {
     if (
-      doubleCoinAdLoading ||
-      amount <= 0 ||
-      gameOverResult?.coinDoubled === true ||
+      reviveAdLoading ||
+      continueUsedThisRun ||
+      game.getState().state !== "gameover" ||
       rewardedAdPurpose
     ) {
       return;
     }
 
     if (!rewardedVideoAd) {
-      doubleCoinMessage = DOUBLE_COINS_AD_FAILED_TEXT;
+      doubleCoinMessage = REVIVE_AD_FAILED_TEXT;
       return;
     }
 
-    doubleCoinAdLoading = true;
-    rewardedAdPurpose = "double-coins";
-    doubleCoinMessage = DOUBLE_COINS_AD_LOADING_TEXT;
+    reviveAdLoading = true;
+    rewardedAdPurpose = "revive";
+    doubleCoinMessage = REVIVE_AD_LOADING_TEXT;
     const showAd = () => rewardedVideoAd.show?.();
     Promise.resolve()
       .then(showAd)
       .catch(() => Promise.resolve(rewardedVideoAd.load?.()).then(() => rewardedVideoAd.show?.()))
       .catch(() => {
-        doubleCoinAdLoading = false;
+        reviveAdLoading = false;
         rewardedAdPurpose = null;
-        doubleCoinMessage = DOUBLE_COINS_AD_FAILED_TEXT;
+        doubleCoinMessage = REVIVE_AD_FAILED_TEXT;
       });
+  }
+
+  function requestDoubleCoinShare() {
+    const amount = Math.max(0, Math.floor(gameOverResult?.coinsEarned || 0));
+    if (
+      amount <= 0 ||
+      gameOverResult?.coinDoubled === true ||
+      pendingDoubleCoinShare
+    ) {
+      return;
+    }
+
+    const rewardButton = currentButtons().find((button) => button.id === "double-coins-share");
+    pendingDoubleCoinShare = {
+      amount,
+      sourceX: rewardButton ? rewardButton.x + rewardButton.width / 2 : screenWidth / 2,
+      sourceY: rewardButton ? rewardButton.y + rewardButton.height / 2 : screenHeight * 0.68
+    };
+    doubleCoinMessage = "";
+    try {
+      if (typeof wxApi.shareAppMessage !== "function") {
+        throw new Error("share unavailable");
+      }
+      wxApi.shareAppMessage(createSharePayload("double-coins"));
+    } catch {
+      pendingDoubleCoinShare = null;
+      doubleCoinMessage = DOUBLE_COINS_SHARE_FAILED_TEXT;
+    }
   }
 
   function currentRecordLevel() {
@@ -981,9 +999,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     clearToolAnimation = null;
     clearAdLoading = false;
     rewardedAdPurpose = null;
-    doubleCoinAdLoading = false;
+    reviveAdLoading = false;
     doubleCoinMessage = "";
     coinDoubleAnimation = null;
+    pendingDoubleCoinShare = null;
     gameOverResult = null;
     newRecordCheerPlayed = false;
     resetRecordConfetti();
@@ -1033,9 +1052,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     newRecordCheerPlayed = false;
     resetRecordConfetti();
     rewardedAdPurpose = null;
-    doubleCoinAdLoading = false;
+    reviveAdLoading = false;
     doubleCoinMessage = "";
     coinDoubleAnimation = null;
+    pendingDoubleCoinShare = null;
     screen = "game";
     overlay = null;
     tutorialIdleTime = 0;
@@ -1063,17 +1083,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     resetRecordConfetti();
   }
 
-  function shareToContinue() {
+  function completeAdRevive() {
     if (continueUsedThisRun || game.getState().state !== "gameover") {
       return;
     }
 
-    try {
-      wxApi.shareAppMessage?.(createSharePayload("loss-continue"));
-    } catch {
-      // Sharing is best-effort; continue is granted even if the share panel cannot open.
-    }
-
+    doubleCoinMessage = "";
     continueUsedThisRun = true;
     if (!game.continueFromGameOver()) {
       return;
@@ -1089,6 +1104,29 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     tutorialIdleTime = 0;
     tutorialDismissed = true;
     persistProgress(true);
+  }
+
+  function completePendingDoubleCoinShare() {
+    if (
+      !pendingDoubleCoinShare ||
+      !gameOverResult ||
+      gameOverResult.coinDoubled === true
+    ) {
+      return false;
+    }
+
+    const reward = pendingDoubleCoinShare;
+    pendingDoubleCoinShare = null;
+    gameOverResult.coinDoubled = true;
+    doubleCoinMessage = "";
+    coinDoubleAnimation = {
+      amount: reward.amount,
+      startedAt: Date.now(),
+      duration: 1050,
+      sourceX: reward.sourceX,
+      sourceY: reward.sourceY
+    };
+    return true;
   }
 
   function showFinalGameOver() {
@@ -1550,7 +1588,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
       if (!continueUsedThisRun) {
         buttons.push({
-          id: "share-continue",
+          id: "ad-continue",
           x: gameOverPanel.x + 24,
           y: gameOverPanel.y + gameOverPanel.height - 76,
           width: gameOverPanel.width - 48,
@@ -1560,7 +1598,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         const earnedCoins = Math.max(0, Math.floor(gameOverResult?.coinsEarned || 0));
         if (earnedCoins > 0 && gameOverResult?.coinDoubled !== true) {
           buttons.push({
-            id: "double-coins-ad",
+            id: "double-coins-share",
             x: gameOverPanel.x + 24,
             y: gameOverPanel.y + gameOverPanel.height - 138,
             width: gameOverPanel.width - 48,
@@ -1624,11 +1662,11 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       case "restart":
         startRun();
         break;
-      case "double-coins-ad":
-        requestDoubleCoinAd();
+      case "double-coins-share":
+        requestDoubleCoinShare();
         break;
-      case "share-continue":
-        shareToContinue();
+      case "ad-continue":
+        requestReviveAd();
         break;
       case "heart-use":
         useHeartToContinue();
@@ -1717,7 +1755,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
 
     roundedRect(context, button.x, button.y, button.width, button.height, 24);
-    const isContinueButton = button.id === "share-continue" ||
+    const isContinueButton = button.id === "ad-continue" ||
       button.id === "continue-challenge" ||
       button.id === "confirm-new-continue";
     const isMainMenuButton = button.id === "continue-challenge" ||
@@ -1726,7 +1764,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       button.id === "leaderboard";
     const usesBlackMainMenuText = button.id === "continue-challenge" || button.id === "play";
     context.fillStyle = isContinueButton
-      ? "#22c55e"
+      ? button.id === "ad-continue"
+        ? "#ef4444"
+        : "#22c55e"
       : button.id === "restart"
         ? "#22c55e"
       : primary
@@ -1735,7 +1775,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
           ? "#2f80ed"
           : "rgba(255,255,255,0.08)";
     context.fill();
-    if (button.id === "double-coins-ad") {
+    if (button.id === "double-coins-share") {
       const shimmer = (Date.now() % 1800) / 1800;
       const shineX = button.x - button.width * 0.35 + shimmer * button.width * 1.7;
       context.save();
@@ -1756,15 +1796,15 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       context.restore();
     }
     if (button.id !== "speed") {
-      context.strokeStyle = button.id === "double-coins-ad"
+      context.strokeStyle = button.id === "double-coins-share"
         ? "rgba(255,245,180,0.95)"
         : isContinueButton
         ? "rgba(255,255,255,0.18)"
         : primary
           ? "rgba(0,0,0,0.08)"
           : "rgba(255,255,255,0.12)";
-      context.lineWidth = button.id === "double-coins-ad" ? 2 : 1;
-      if (button.id === "double-coins-ad") {
+      context.lineWidth = button.id === "double-coins-share" ? 2 : 1;
+      if (button.id === "double-coins-share") {
         context.save();
         context.shadowColor = "rgba(250,204,21,0.72)";
         context.shadowBlur = 14 + Math.sin(Date.now() * 0.006) * 4;
@@ -1785,21 +1825,25 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     context.font = "700 20px sans-serif";
     context.textBaseline = "middle";
 
-    if (button.id === "double-coins-ad") {
+    if (button.id === "double-coins-share") {
       const amount = Math.max(0, Math.floor(gameOverResult?.coinsEarned || 0));
       const amountText = `+${amount}`;
       const iconSize = 24;
-      const gap = 7;
-      context.font = "800 18px sans-serif";
+      const gap = 6;
+      context.font = "800 17px sans-serif";
       const labelWidth = context.measureText(label).width;
       context.font = "900 18px sans-serif";
       const amountWidth = context.measureText(amountText).width;
-      const totalWidth = labelWidth + gap + iconSize + 3 + amountWidth;
+      const totalWidth = iconSize + gap + labelWidth + gap + iconSize + 3 + amountWidth;
       let cursorX = button.x + (button.width - totalWidth) / 2;
       const centerY = button.y + button.height / 2;
 
+      if (shareIconAsset.loaded && shareIconAsset.image) {
+        context.drawImage(shareIconAsset.image, cursorX, centerY - iconSize / 2, iconSize, iconSize);
+      }
+      cursorX += iconSize + gap;
       context.fillStyle = "#1d1d1d";
-      context.font = "800 18px sans-serif";
+      context.font = "800 17px sans-serif";
       context.textAlign = "left";
       context.fillText(label, cursorX, centerY + 1);
       cursorX += labelWidth + gap;
@@ -1814,6 +1858,21 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       context.fillStyle = "#1d1d1d";
       context.font = "900 18px sans-serif";
       context.fillText(amountText, cursorX + iconSize + 3, centerY + 1);
+      return;
+    }
+
+    if (button.id === "ad-continue") {
+      const iconSize = 24;
+      const gap = 8;
+      const textWidth = context.measureText(label).width;
+      const contentX = button.x + (button.width - iconSize - gap - textWidth) / 2;
+      const centerY = button.y + button.height / 2;
+      if (adVideoIconAsset.loaded && adVideoIconAsset.image) {
+        context.drawImage(adVideoIconAsset.image, contentX, centerY - iconSize / 2, iconSize, iconSize);
+      }
+      context.fillStyle = "#ffffff";
+      context.textAlign = "left";
+      context.fillText(label, contentX + iconSize + gap, centerY + 1);
       return;
     }
 
@@ -3098,20 +3157,46 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
 
     if (confirmButton) {
-      drawButton(
-        context,
-        confirmButton,
-        mode === "ad" ? texts.clearAdConfirm : texts.clearConfirm,
-        true
-      );
       if (mode === "ad" && adVideoIconAsset.loaded && adVideoIconAsset.image) {
-        const iconButtonSize = 22;
+        roundedRect(
+          context,
+          confirmButton.x,
+          confirmButton.y,
+          confirmButton.width,
+          confirmButton.height,
+          24
+        );
+        context.fillStyle = "#f2b400";
+        context.fill();
+        context.strokeStyle = "rgba(0,0,0,0.08)";
+        context.lineWidth = 1;
+        context.stroke();
+
+        const label = texts.clearAdConfirm;
+        const iconButtonSize = 24;
+        const gap = 8;
+        context.fillStyle = "#1d1d1d";
+        context.font = "700 20px sans-serif";
+        context.textBaseline = "middle";
+        const textWidth = context.measureText(label).width;
+        const contentX = confirmButton.x +
+          (confirmButton.width - iconButtonSize - gap - textWidth) / 2;
+        const centerY = confirmButton.y + confirmButton.height / 2;
         context.drawImage(
           adVideoIconAsset.image,
-          confirmButton.x + 20,
-          confirmButton.y + (confirmButton.height - iconButtonSize) / 2,
+          contentX,
+          centerY - iconButtonSize / 2,
           iconButtonSize,
           iconButtonSize
+        );
+        context.textAlign = "left";
+        context.fillText(label, contentX + iconButtonSize + gap, centerY + 1);
+      } else {
+        drawButton(
+          context,
+          confirmButton,
+          mode === "ad" ? texts.clearAdConfirm : texts.clearConfirm,
+          true
         );
       }
     }
@@ -3467,7 +3552,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     const previousRecordLevel = result?.previousRecordLevel ?? currentRecordLevel();
     const brokeRecord = result?.brokeRecord === true;
     const restartButton = currentButtons().find((button) => button.id === "restart");
-    const doubleCoinsButton = currentButtons().find((button) => button.id === "double-coins-ad");
+    const doubleCoinsButton = currentButtons().find((button) => button.id === "double-coins-share");
     const contentTop = panel.y + 82;
     const firstActionButton = doubleCoinsButton || restartButton;
     const contentBottom = firstActionButton ? firstActionButton.y - 16 : panel.y + panel.height - 92;
@@ -3767,7 +3852,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     if (overlay === "gameover") {
       if (!continueUsedThisRun) {
-        const shareContinueButton = currentButtons().find((button) => button.id === "share-continue");
+        const shareContinueButton = currentButtons().find((button) => button.id === "ad-continue");
         const lineTop = panel.y + 120;
         const lineBottom = shareContinueButton ? shareContinueButton.y - 14 : panel.y + panel.height - 96;
         const lineGap = Math.max(24, Math.min(34, (lineBottom - lineTop) / 2));
@@ -3775,11 +3860,19 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         context.font = "17px sans-serif";
         context.fillText(texts.shareContinueHintTwo, screenWidth / 2, lineTop);
         context.fillText(texts.shareContinueHintThree, screenWidth / 2, lineTop + lineGap);
+        if (doubleCoinMessage) {
+          context.fillStyle = doubleCoinMessage === REVIVE_AD_FAILED_TEXT ? "#fca5a5" : "#facc15";
+          context.font = "700 13px sans-serif";
+          context.fillText(doubleCoinMessage, screenWidth / 2, shareContinueButton.y - 10);
+        }
       } else {
         drawFinalScoreResult(context, panel, gameOverResult, state);
         if (doubleCoinMessage) {
-          const doubleCoinsButton = currentButtons().find((button) => button.id === "double-coins-ad");
-          context.fillStyle = doubleCoinMessage === DOUBLE_COINS_AD_FAILED_TEXT ? "#fca5a5" : "#facc15";
+          const doubleCoinsButton = currentButtons().find((button) => button.id === "double-coins-share");
+          context.fillStyle = doubleCoinMessage === DOUBLE_COINS_SHARE_FAILED_TEXT ||
+            doubleCoinMessage === REVIVE_AD_FAILED_TEXT
+            ? "#fca5a5"
+            : "#facc15";
           context.font = "700 13px sans-serif";
           context.textAlign = "center";
           context.fillText(
@@ -3817,9 +3910,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         settings: texts.settings,
         menu: texts.mainMenu,
         "settings-done": texts.done,
-        "share-continue": texts.shareContinue,
+        "ad-continue": texts.shareContinue,
         restart: texts.restart,
-        "double-coins-ad": DOUBLE_COINS_AD_TEXT,
+        "double-coins-share": DOUBLE_COINS_SHARE_TEXT,
         "confirm-new-continue": texts.continueChallenge,
         "confirm-new-start": texts.startNew,
         "heart-use": texts.useHeart,
@@ -3838,12 +3931,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         labels[button.id],
         button.id === "resume" ||
           (overlay === "gameover" && button.id === "menu") ||
-          button.id === "share-continue" ||
+          button.id === "ad-continue" ||
           button.id === "confirm-new-continue" ||
           button.id === "confirm-new-start" ||
           button.id === "heart-use" ||
           (button.id === "daily-checkin-ok" && Boolean(pendingCheckIn?.reward)) ||
-          button.id === "double-coins-ad" ||
+          button.id === "double-coins-share" ||
           button.id === "restart" ||
         button.id === "settings-done"
       );
@@ -4060,7 +4153,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     persistProgress(true);
   });
   wxApi.onShow?.(() => {
-    claimDailyCheckIn();
+    if (completePendingDoubleCoinShare()) {
+      return;
+    }
+    if (screen === "menu") {
+      claimDailyCheckIn();
+    }
   });
 
   function loop() {
