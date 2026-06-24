@@ -78,12 +78,16 @@ const texts = {
 const HEART_CONTINUE_PANEL_Y_SCALE = 0.23;
 const HEART_CONTINUE_PANEL_MIN_HEIGHT = 230;
 const HEART_CONTINUE_PANEL_MAX_HEIGHT = 252;
+const DOUBLE_COINS_AD_TEXT = "\u770b\u5e7f\u544a\u7ffb\u500d";
+const DOUBLE_COINS_AD_LOADING_TEXT = "\u5e7f\u544a\u52a0\u8f7d\u4e2d";
+const DOUBLE_COINS_AD_FAILED_TEXT = "\u5e7f\u544a\u6682\u65f6\u4e0d\u53ef\u7528\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5";
 const CLEAR_TOOL_MAX_USES_PER_RUN = 3;
 const CLEAR_TOOL_ROWS = 3;
 const CLEAR_TOOL_AD_UNIT_ID = "adunit-fce0dbb1a75742d4";
 const ITEM_TRAY_HEIGHT = 86;
 const ITEM_TRAY_GAP = 8;
 const CLEAR_ANIMATION_DURATION = 550;
+const MENU_TITLE_FONT_FAMILY = '"Arial Rounded MT Bold", "YouYuan", "PingFang SC", "Microsoft YaHei", sans-serif';
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -110,16 +114,43 @@ function settingsPanelRect(rect) {
     x: rect.x + panelSideInset,
     y: rect.y + rect.height * 0.24,
     width: rect.width - panelSideInset * 2,
-    height: rect.height * 0.58
+    height: rect.height * 0.7
+  };
+}
+
+function settingsLayout(panel) {
+  const horizontalInset = clamp(panel.width * 0.11, 28, 36);
+  const buttonHeight = 48;
+  const doneHeight = 52;
+  const doneY = panel.y + panel.height - horizontalInset - doneHeight;
+  const contentTop = panel.y + 88;
+  const contentBottom = doneY - 20;
+  const availableHeight = Math.max(buttonHeight * 2 + 14, contentBottom - contentTop);
+  const rowGap = clamp(availableHeight - buttonHeight * 2, 16, 28);
+  const rowsHeight = buttonHeight * 2 + rowGap;
+  const firstRowY = contentTop + Math.max(0, (availableHeight - rowsHeight) / 2);
+  const toggleWidth = clamp(panel.width * 0.32, 96, 106);
+
+  return {
+    labelX: panel.x + horizontalInset,
+    toggleX: panel.x + panel.width - horizontalInset - toggleWidth,
+    toggleWidth,
+    buttonHeight,
+    soundY: firstRowY,
+    vibrationY: firstRowY + buttonHeight + rowGap,
+    doneX: panel.x + horizontalInset,
+    doneY,
+    doneWidth: panel.width - horizontalInset * 2,
+    doneHeight
   };
 }
 
 function clearToolPanelRect(rect) {
   const panelSideInset = 24;
-  const panelHeight = clamp(rect.height * 0.46, 292, 328);
+  const panelHeight = clamp(rect.height * 0.56, 354, 390);
   return {
     x: rect.x + panelSideInset,
-    y: rect.y + rect.height * 0.22,
+    y: rect.y + rect.height * 0.16,
     width: rect.width - panelSideInset * 2,
     height: panelHeight
   };
@@ -132,6 +163,10 @@ function lerp(start, end, amount) {
 function easeOutCubic(amount) {
   const inverted = 1 - amount;
   return 1 - inverted * inverted * inverted;
+}
+
+function menuTitleFont(size, weight = 800) {
+  return `${weight} ${size}px ${MENU_TITLE_FONT_FAMILY}`;
 }
 
 function roundedRect(context, x, y, width, height, radius) {
@@ -343,6 +378,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   const reviveSoundPlayer = createSoundPlayer(wxApi, "src/assets/sound/revive.mp3", {
     volume: 0.76
   });
+  const clearRowsSoundPlayer = createSoundPlayer(wxApi, "src/assets/sound/clear.mp3", {
+    volume: 0.72
+  });
   const rewardedVideoAd = wxApi.createRewardedVideoAd?.({
     adUnitId: CLEAR_TOOL_AD_UNIT_ID
   });
@@ -381,6 +419,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
     if (type === "coin") {
       coinSoundPlayer.play();
+      if (hasStartedRun) {
+        runCoinsEarned += 1;
+      }
     }
     if (type === "newRecord") {
       cheerSoundPlayer.play();
@@ -390,6 +431,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
     if (type === "clear") {
       vibrateOnBrickClear();
+    }
+    if (type === "clearRows") {
+      clearRowsSoundPlayer.play();
     }
   });
 
@@ -406,6 +450,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let lastSavedProgressAt = 0;
   let hasStartedRun = false;
   let continueUsedThisRun = false;
+  let runCoinsEarned = 0;
   let gameOverResult = null;
   let newRecordCheerPlayed = false;
   let recordConfetti = null;
@@ -429,7 +474,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let clearUsesThisRun = 0;
   let clearToolMessage = "";
   let clearToolAnimation = null;
+  let clearToolDemoStartedAt = 0;
   let clearAdLoading = false;
+  let rewardedAdPurpose = null;
+  let doubleCoinAdLoading = false;
+  let doubleCoinMessage = "";
+  let coinDoubleAnimation = null;
   let pendingCheckIn = null;
   let dailyRewardsView = null;
   let dailyClaimAnimation = null;
@@ -566,6 +616,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       savedAt: Date.now(),
       continueUsedThisRun,
       runStartBestScore,
+      runCoinsEarned,
       clearFreeItemAvailable,
       clearAdItemsThisRun,
       clearUsesThisRun,
@@ -636,7 +687,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
   function clearToolButtonRect(rect) {
     const tray = itemTrayRect(rect);
-    const size = clamp(Math.min(tray.height, 72), 58, 72);
+    const size = clamp(Math.min(tray.height, 82), 64, 82);
     return {
       id: "clear-tool",
       x: tray.x + 12,
@@ -659,6 +710,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
 
     clearToolMessage = "";
+    clearToolDemoStartedAt = Date.now();
     overlay = "clear-tool";
   }
 
@@ -723,6 +775,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
 
     clearAdLoading = true;
+    rewardedAdPurpose = "clear-tool";
     clearToolMessage = texts.clearAdLoading;
     const showAd = () => rewardedVideoAd.show?.();
     Promise.resolve()
@@ -730,13 +783,40 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       .catch(() => Promise.resolve(rewardedVideoAd.load?.()).then(() => rewardedVideoAd.show?.()))
       .catch(() => {
         clearAdLoading = false;
+        rewardedAdPurpose = null;
         clearToolMessage = texts.clearAdFailed;
       });
   }
 
   rewardedVideoAd?.onClose?.((result) => {
+    const purpose = rewardedAdPurpose;
+    rewardedAdPurpose = null;
+    const completed = result?.isEnded === true || result === undefined;
+
+    if (purpose === "double-coins") {
+      doubleCoinAdLoading = false;
+      if (completed) {
+        const amount = Math.max(0, Math.floor(gameOverResult?.coinsEarned || 0));
+        if (amount > 0 && gameOverResult && gameOverResult.coinDoubled !== true) {
+          const rewardButton = currentButtons().find((button) => button.id === "double-coins-ad");
+          gameOverResult.coinDoubled = true;
+          doubleCoinMessage = "";
+          coinDoubleAnimation = {
+            amount,
+            startedAt: Date.now(),
+            duration: 1050,
+            sourceX: rewardButton ? rewardButton.x + rewardButton.width / 2 : screenWidth / 2,
+            sourceY: rewardButton ? rewardButton.y + rewardButton.height / 2 : screenHeight * 0.68
+          };
+        }
+      } else {
+        doubleCoinMessage = "";
+      }
+      return;
+    }
+
     clearAdLoading = false;
-    if (result?.isEnded === true || result === undefined) {
+    if (purpose === "clear-tool" && completed) {
       clearAdItemsThisRun += 1;
       clearToolMessage = texts.clearAdRewarded;
       persistProgress(true);
@@ -746,9 +826,46 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     clearToolMessage = "";
   });
   rewardedVideoAd?.onError?.(() => {
+    const purpose = rewardedAdPurpose;
+    rewardedAdPurpose = null;
+    if (purpose === "double-coins") {
+      doubleCoinAdLoading = false;
+      doubleCoinMessage = DOUBLE_COINS_AD_FAILED_TEXT;
+      return;
+    }
     clearAdLoading = false;
     clearToolMessage = texts.clearAdFailed;
   });
+
+  function requestDoubleCoinAd() {
+    const amount = Math.max(0, Math.floor(gameOverResult?.coinsEarned || 0));
+    if (
+      doubleCoinAdLoading ||
+      amount <= 0 ||
+      gameOverResult?.coinDoubled === true ||
+      rewardedAdPurpose
+    ) {
+      return;
+    }
+
+    if (!rewardedVideoAd) {
+      doubleCoinMessage = DOUBLE_COINS_AD_FAILED_TEXT;
+      return;
+    }
+
+    doubleCoinAdLoading = true;
+    rewardedAdPurpose = "double-coins";
+    doubleCoinMessage = DOUBLE_COINS_AD_LOADING_TEXT;
+    const showAd = () => rewardedVideoAd.show?.();
+    Promise.resolve()
+      .then(showAd)
+      .catch(() => Promise.resolve(rewardedVideoAd.load?.()).then(() => rewardedVideoAd.show?.()))
+      .catch(() => {
+        doubleCoinAdLoading = false;
+        rewardedAdPurpose = null;
+        doubleCoinMessage = DOUBLE_COINS_AD_FAILED_TEXT;
+      });
+  }
 
   function currentRecordLevel() {
     return Math.max(1, Math.floor(bestScore) + 1);
@@ -856,12 +973,17 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     overlay = "pause";
     hasStartedRun = true;
     continueUsedThisRun = progress.continueUsedThisRun === true;
+    runCoinsEarned = Math.max(0, Math.floor(Number(progress.runCoinsEarned) || 0));
     clearFreeItemAvailable = progress.clearFreeItemAvailable !== false && storage.loadClearFreeUsed() !== true;
     clearAdItemsThisRun = Math.max(0, Math.floor(Number(progress.clearAdItemsThisRun) || 0));
     clearUsesThisRun = Math.max(0, Math.floor(Number(progress.clearUsesThisRun) || 0));
     clearToolMessage = "";
     clearToolAnimation = null;
     clearAdLoading = false;
+    rewardedAdPurpose = null;
+    doubleCoinAdLoading = false;
+    doubleCoinMessage = "";
+    coinDoubleAnimation = null;
     gameOverResult = null;
     newRecordCheerPlayed = false;
     resetRecordConfetti();
@@ -904,11 +1026,16 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     clearToolAnimation = null;
     clearAdLoading = false;
     game.restart();
+    runCoinsEarned = 0;
     hasStartedRun = true;
     continueUsedThisRun = false;
     gameOverResult = null;
     newRecordCheerPlayed = false;
     resetRecordConfetti();
+    rewardedAdPurpose = null;
+    doubleCoinAdLoading = false;
+    doubleCoinMessage = "";
+    coinDoubleAnimation = null;
     screen = "game";
     overlay = null;
     tutorialIdleTime = 0;
@@ -1100,8 +1227,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   function currentButtons() {
     const rect = canvasRect();
     const layout = shopLayout();
-    const gameOverPanelYScale = continueUsedThisRun ? 0.16 : 0.24;
-    const gameOverPanelHeightScale = continueUsedThisRun ? 0.68 : 0.54;
+    const gameOverPanelYScale = continueUsedThisRun ? 0.1 : 0.24;
+    const gameOverPanelHeightScale = continueUsedThisRun ? 0.78 : 0.54;
     const confirmNewRunPanel = {
       x: rect.x + 24,
       y: rect.y + rect.height * 0.16,
@@ -1237,27 +1364,28 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       }
 
       if (overlay === "settings") {
+        const settings = settingsLayout(settingsPanel);
         buttons.push(
           {
             id: "toggle-sound",
-            x: settingsPanel.x + settingsPanel.width - 142,
-            y: settingsPanel.y + 92,
-            width: 106,
-            height: 48
+            x: settings.toggleX,
+            y: settings.soundY,
+            width: settings.toggleWidth,
+            height: settings.buttonHeight
           },
           {
             id: "toggle-vibration",
-            x: settingsPanel.x + settingsPanel.width - 142,
-            y: settingsPanel.y + 164,
-            width: 106,
-            height: 48
+            x: settings.toggleX,
+            y: settings.vibrationY,
+            width: settings.toggleWidth,
+            height: settings.buttonHeight
           },
           {
             id: "settings-done",
-            x: settingsPanel.x + 36,
-            y: settingsPanel.y + settingsPanel.height - 76,
-            width: settingsPanel.width - 72,
-            height: 52
+            x: settings.doneX,
+            y: settings.doneY,
+            width: settings.doneWidth,
+            height: settings.doneHeight
           }
         );
       }
@@ -1365,27 +1493,28 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
 
     if (overlay === "settings") {
+      const settings = settingsLayout(settingsPanel);
       buttons.push(
         {
           id: "toggle-sound",
-          x: settingsPanel.x + settingsPanel.width - 142,
-          y: settingsPanel.y + 92,
-          width: 106,
-          height: 48
+          x: settings.toggleX,
+          y: settings.soundY,
+          width: settings.toggleWidth,
+          height: settings.buttonHeight
         },
         {
           id: "toggle-vibration",
-          x: settingsPanel.x + settingsPanel.width - 142,
-          y: settingsPanel.y + 164,
-          width: 106,
-          height: 48
+          x: settings.toggleX,
+          y: settings.vibrationY,
+          width: settings.toggleWidth,
+          height: settings.buttonHeight
         },
         {
           id: "settings-done",
-          x: settingsPanel.x + 36,
-          y: settingsPanel.y + settingsPanel.height - 76,
-          width: settingsPanel.width - 72,
-          height: 52
+          x: settings.doneX,
+          y: settings.doneY,
+          width: settings.doneWidth,
+          height: settings.doneHeight
         }
       );
     }
@@ -1428,6 +1557,16 @@ export function bootMiniGame(wxApi = globalThis.wx) {
           height: 52
         });
       } else {
+        const earnedCoins = Math.max(0, Math.floor(gameOverResult?.coinsEarned || 0));
+        if (earnedCoins > 0 && gameOverResult?.coinDoubled !== true) {
+          buttons.push({
+            id: "double-coins-ad",
+            x: gameOverPanel.x + 24,
+            y: gameOverPanel.y + gameOverPanel.height - 138,
+            width: gameOverPanel.width - 48,
+            height: 52
+          });
+        }
         buttons.push({
           id: "restart",
           x: gameOverPanel.x + 24,
@@ -1442,6 +1581,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   function handleButton(id) {
+    if (coinDoubleAnimation && screen === "game" && overlay === "gameover") {
+      return;
+    }
+
     switch (id) {
       case "continue-challenge":
         continueFromMenu();
@@ -1480,6 +1623,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         break;
       case "restart":
         startRun();
+        break;
+      case "double-coins-ad":
+        requestDoubleCoinAd();
         break;
       case "share-continue":
         shareToContinue();
@@ -1574,27 +1720,102 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     const isContinueButton = button.id === "share-continue" ||
       button.id === "continue-challenge" ||
       button.id === "confirm-new-continue";
+    const isMainMenuButton = button.id === "continue-challenge" ||
+      button.id === "play" ||
+      button.id === "shop" ||
+      button.id === "leaderboard";
+    const usesBlackMainMenuText = button.id === "continue-challenge" || button.id === "play";
     context.fillStyle = isContinueButton
       ? "#22c55e"
+      : button.id === "restart"
+        ? "#22c55e"
       : primary
         ? "#f2b400"
         : button.id === "shop"
           ? "#2f80ed"
           : "rgba(255,255,255,0.08)";
     context.fill();
+    if (button.id === "double-coins-ad") {
+      const shimmer = (Date.now() % 1800) / 1800;
+      const shineX = button.x - button.width * 0.35 + shimmer * button.width * 1.7;
+      context.save();
+      context.beginPath();
+      roundedRect(context, button.x, button.y, button.width, button.height, 24);
+      context.clip();
+      const shine = context.createLinearGradient(
+        shineX - button.width * 0.18,
+        button.y,
+        shineX + button.width * 0.18,
+        button.y
+      );
+      shine.addColorStop(0, "rgba(255,255,255,0)");
+      shine.addColorStop(0.5, "rgba(255,255,255,0.62)");
+      shine.addColorStop(1, "rgba(255,255,255,0)");
+      context.fillStyle = shine;
+      context.fillRect(button.x, button.y, button.width, button.height);
+      context.restore();
+    }
     if (button.id !== "speed") {
-      context.strokeStyle = isContinueButton
+      context.strokeStyle = button.id === "double-coins-ad"
+        ? "rgba(255,245,180,0.95)"
+        : isContinueButton
         ? "rgba(255,255,255,0.18)"
         : primary
           ? "rgba(0,0,0,0.08)"
           : "rgba(255,255,255,0.12)";
-      context.lineWidth = 1;
-      context.stroke();
+      context.lineWidth = button.id === "double-coins-ad" ? 2 : 1;
+      if (button.id === "double-coins-ad") {
+        context.save();
+        context.shadowColor = "rgba(250,204,21,0.72)";
+        context.shadowBlur = 14 + Math.sin(Date.now() * 0.006) * 4;
+        context.stroke();
+        context.restore();
+      } else {
+        context.stroke();
+      }
     }
     const usesDarkButtonText = primary || isContinueButton || button.id === "shop";
-    context.fillStyle = usesDarkButtonText ? "#1d1d1d" : "#fbfbfb";
+    context.fillStyle = usesBlackMainMenuText
+      ? "#1d1d1d"
+      : isMainMenuButton
+        ? "#ffffff"
+        : usesDarkButtonText
+          ? "#1d1d1d"
+          : "#fbfbfb";
     context.font = "700 20px sans-serif";
     context.textBaseline = "middle";
+
+    if (button.id === "double-coins-ad") {
+      const amount = Math.max(0, Math.floor(gameOverResult?.coinsEarned || 0));
+      const amountText = `+${amount}`;
+      const iconSize = 24;
+      const gap = 7;
+      context.font = "800 18px sans-serif";
+      const labelWidth = context.measureText(label).width;
+      context.font = "900 18px sans-serif";
+      const amountWidth = context.measureText(amountText).width;
+      const totalWidth = labelWidth + gap + iconSize + 3 + amountWidth;
+      let cursorX = button.x + (button.width - totalWidth) / 2;
+      const centerY = button.y + button.height / 2;
+
+      context.fillStyle = "#1d1d1d";
+      context.font = "800 18px sans-serif";
+      context.textAlign = "left";
+      context.fillText(label, cursorX, centerY + 1);
+      cursorX += labelWidth + gap;
+      if (coinIconAsset.loaded && coinIconAsset.image) {
+        context.drawImage(coinIconAsset.image, cursorX, centerY - iconSize / 2, iconSize, iconSize);
+      } else {
+        context.beginPath();
+        context.arc(cursorX + iconSize / 2, centerY, iconSize / 2, 0, Math.PI * 2);
+        context.fillStyle = "#facc15";
+        context.fill();
+      }
+      context.fillStyle = "#1d1d1d";
+      context.font = "900 18px sans-serif";
+      context.fillText(amountText, cursorX + iconSize + 3, centerY + 1);
+      return;
+    }
 
     if (button.id === "speed" && speedIconAsset.loaded && speedIconAsset.image) {
       const iconSize = 20;
@@ -1632,7 +1853,13 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     if (subtitle) {
       context.font = "700 19px sans-serif";
       context.fillText(label, button.x + button.width / 2, button.y + button.height / 2 - 8);
-      context.fillStyle = usesDarkButtonText ? "rgba(29,29,29,0.72)" : "rgba(255,255,255,0.78)";
+      context.fillStyle = usesBlackMainMenuText
+        ? "rgba(29,29,29,0.72)"
+        : isMainMenuButton
+          ? "rgba(255,255,255,0.82)"
+        : usesDarkButtonText
+          ? "rgba(29,29,29,0.72)"
+          : "rgba(255,255,255,0.78)";
       context.font = "600 14px sans-serif";
       context.fillText(subtitle, button.x + button.width / 2, button.y + button.height / 2 + 15);
       return;
@@ -1850,7 +2077,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     context.fillRect(0, 0, screenWidth, screenHeight);
 
     context.fillStyle = "#fbfbfb";
-    context.font = "800 36px sans-serif";
+    context.font = menuTitleFont(36);
     context.textAlign = "center";
     context.textBaseline = "middle";
     context.fillText(texts.shop, screenWidth / 2, panel.y + 48);
@@ -2756,6 +2983,55 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     drawHeartCounter(context, screenWidth - rect.horizontalPadding, rect.topInset + 78, state.heartCount);
   }
 
+  function drawCoinDoubleAnimation(context, state, rect) {
+    if (!coinDoubleAnimation) {
+      return;
+    }
+
+    const elapsed = Date.now() - coinDoubleAnimation.startedAt;
+    const target = counterIconTarget(context, rect, "coin", state);
+    const sourceX = coinDoubleAnimation.sourceX ?? screenWidth / 2;
+    const sourceY = coinDoubleAnimation.sourceY ??
+      Math.min(screenHeight * 0.68, rect.y + rect.height * 0.72);
+    const coinCount = clamp(coinDoubleAnimation.amount, 4, 8);
+
+    for (let index = 0; index < coinCount; index += 1) {
+      const delay = index * 55;
+      const flight = clamp((elapsed - delay) / 700, 0, 1);
+      if (flight <= 0 || flight >= 1) {
+        continue;
+      }
+
+      const eased = easeOutCubic(flight);
+      const spread = (index - (coinCount - 1) / 2) * 12;
+      const x = lerp(sourceX + spread, target.x, eased);
+      const y = lerp(sourceY + Math.abs(spread) * 0.28, target.y, eased) -
+        Math.sin(flight * Math.PI) * (58 + (index % 3) * 8);
+      const size = lerp(32, 19, eased);
+      const alpha = 1 - Math.max(0, flight - 0.86) / 0.14;
+      drawRewardIcon(context, {
+        asset: coinIconAsset,
+        fallback: "$",
+        color: "#f2b400",
+        fallbackColor: "#1d1d1d"
+      }, x, y, size, alpha);
+    }
+
+    const glowProgress = clamp((elapsed - 650) / 350, 0, 1);
+    if (glowProgress > 0) {
+      const glow = Math.sin(glowProgress * Math.PI);
+      context.save();
+      context.beginPath();
+      context.arc(target.x, target.y, 28 + glow * 12, 0, Math.PI * 2);
+      context.strokeStyle = `rgba(250,204,21,${0.2 + glow * 0.45})`;
+      context.lineWidth = 3;
+      context.stroke();
+      context.restore();
+    }
+
+    drawCoinCounter(context, screenWidth - rect.horizontalPadding, rect.topInset + 40, state.coins);
+  }
+
   function drawClearToolButton(context, rect) {
     const button = currentButtons().find((candidate) => candidate.id === "clear-tool");
     if (!button) {
@@ -2770,16 +3046,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     context.fillStyle = "rgba(10,15,35,0.22)";
     context.fill();
 
-    roundedRect(context, button.x, button.y, button.width, button.height, 16);
-    context.fillStyle = disabled ? "rgba(255,255,255,0.1)" : "rgba(250,204,21,0.18)";
-    context.fill();
-    context.strokeStyle = count > 0 ? "rgba(250,204,21,0.78)" : "rgba(255,255,255,0.18)";
-    context.lineWidth = 2;
-    context.stroke();
-
-    const iconSize = button.width * 0.58;
+    const iconSize = button.width * 0.9;
     const iconX = button.x + (button.width - iconSize) / 2;
-    const iconY = button.y + 7;
+    const iconY = button.y + (button.height - iconSize) / 2;
     context.globalAlpha = disabled ? 0.45 : 1;
     if (clearLinesIconAsset.loaded && clearLinesIconAsset.image) {
       context.drawImage(clearLinesIconAsset.image, iconX, iconY, iconSize, iconSize);
@@ -2794,32 +3063,22 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
     context.globalAlpha = 1;
 
-    context.fillStyle = disabled ? "rgba(255,255,255,0.45)" : "#fbfbfb";
-    context.font = "800 12px sans-serif";
-    context.textAlign = "center";
-    context.textBaseline = "alphabetic";
-    context.fillText(texts.clearThreeRows, button.x + button.width / 2, button.y + button.height - 8);
-
     roundedRect(context, button.x + button.width - 33, button.y - 8, 40, 28, 14);
     context.fillStyle = count > 0 ? "#22c55e" : "rgba(255,255,255,0.16)";
     context.fill();
-    context.fillStyle = count > 0 ? "#052e16" : "rgba(255,255,255,0.72)";
+    context.fillStyle = "#ffffff";
     context.font = "900 16px sans-serif";
+    context.textAlign = "center";
     context.textBaseline = "middle";
-    context.fillText(`x${count}`, button.x + button.width - 13, button.y + 6);
+    context.fillText(String(count), button.x + button.width - 13, button.y + 6);
     context.restore();
   }
 
   function drawClearToolPanel(context, panel) {
     const mode = clearToolPanelMode();
     const confirmButton = currentButtons().find((button) => button.id === "clear-tool-confirm");
-    const iconSize = 38;
     const centerX = panel.x + panel.width / 2;
-    const iconY = panel.y + 66;
-
-    if (clearLinesIconAsset.loaded && clearLinesIconAsset.image) {
-      context.drawImage(clearLinesIconAsset.image, centerX - iconSize / 2, iconY, iconSize, iconSize);
-    }
+    drawClearToolDemo(context, panel);
 
     context.fillStyle = "rgba(255,255,255,0.82)";
     context.font = "16px sans-serif";
@@ -2829,7 +3088,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       ? ["每局最多使用 3 次清除功能，", "下一局可重新使用。"]
       : ["将清除最下面 3 行砖块，", "帮你缓解底部压力。"];
     for (let index = 0; index < lines.length; index += 1) {
-      context.fillText(lines[index], centerX, panel.y + 132 + index * 24);
+      context.fillText(lines[index], centerX, panel.y + 218 + index * 24);
     }
 
     if (clearToolMessage) {
@@ -2858,6 +3117,179 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
   }
 
+  function drawClearToolDemo(context, panel) {
+    const demo = {
+      x: panel.x + 24,
+      y: panel.y + 72,
+      width: panel.width - 48,
+      height: 126
+    };
+    const columns = 6;
+    const rows = 4;
+    const gap = 3;
+    const cellSize = Math.min(
+      (demo.width - gap * (columns - 1)) / columns,
+      (demo.height - gap * (rows - 1)) / rows
+    );
+    const boardWidth = cellSize * columns + gap * (columns - 1);
+    const boardHeight = cellSize * rows + gap * (rows - 1);
+    const boardX = demo.x + (demo.width - boardWidth) / 2;
+    const boardY = demo.y + (demo.height - boardHeight) / 2;
+    const blockCells = [
+      [0, 0, 4], [2, 0, 3], [4, 0, 5],
+      [0, 1, 3], [1, 1, 2], [3, 1, 4], [5, 1, 2],
+      [0, 2, 5], [2, 2, 3], [3, 2, 2], [5, 2, 4],
+      [0, 3, 2], [1, 3, 4], [3, 3, 3], [4, 3, 5], [5, 3, 2]
+    ];
+    const demoBlocks = blockCells.map(([column, row, hp], index) => ({
+      x: boardX + column * (cellSize + gap),
+      y: boardY + row * (cellSize + gap),
+      size: cellSize,
+      column,
+      row,
+      hp,
+      angle: (index * 1.37) % (Math.PI * 2),
+      drift: 10 + (index % 4) * 3,
+      color: row === 0 ? "#90b4dd" : row % 2 === 0 ? "#78a6d6" : "#a8c4e5"
+    }));
+    const cycleElapsed = Math.max(0, Date.now() - clearToolDemoStartedAt) % 3000;
+    const clearProgress = clamp((cycleElapsed - 1000) / 1000, 0, 1);
+
+    context.save();
+    roundedRect(context, demo.x, demo.y, demo.width, demo.height, 10);
+    context.fillStyle = "#0d2036";
+    context.fill();
+    context.beginPath();
+    roundedRect(context, demo.x, demo.y, demo.width, demo.height, 10);
+    context.clip();
+
+    for (const block of demoBlocks) {
+      if (block.row > 0 && clearProgress > 0) {
+        continue;
+      }
+      roundedRect(context, block.x, block.y, block.size, block.size, 3);
+      context.fillStyle = block.color;
+      context.fill();
+      context.strokeStyle = "rgba(255,255,255,0.2)";
+      context.lineWidth = 1;
+      context.stroke();
+      context.fillStyle = "#f5f9ff";
+      context.font = `700 ${Math.max(10, cellSize * 0.42)}px sans-serif`;
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText(String(block.hp), block.x + block.size / 2, block.y + block.size / 2 + 1);
+    }
+
+    drawDemoAddBall(
+      context,
+      boardX + 4 * (cellSize + gap) + cellSize / 2,
+      boardY + (cellSize + gap) + cellSize / 2,
+      cellSize * 0.28
+    );
+    drawDemoCoin(
+      context,
+      boardX + (cellSize + gap) + cellSize / 2,
+      boardY + 2 * (cellSize + gap) + cellSize / 2,
+      cellSize * 0.3
+    );
+
+    if (clearProgress > 0 && clearProgress < 1) {
+      drawClearBlockEffect(
+        context,
+        demoBlocks.filter((block) => block.row > 0),
+        clearProgress,
+        demo
+      );
+    }
+    context.restore();
+  }
+
+  function drawDemoAddBall(context, x, y, radius) {
+    context.beginPath();
+    context.arc(x, y, radius, 0, Math.PI * 2);
+    context.fillStyle = "rgba(255,179,71,0.18)";
+    context.fill();
+    context.strokeStyle = "#ffcf8c";
+    context.lineWidth = 2;
+    context.stroke();
+    context.beginPath();
+    context.moveTo(x - radius * 0.48, y);
+    context.lineTo(x + radius * 0.48, y);
+    context.moveTo(x, y - radius * 0.48);
+    context.lineTo(x, y + radius * 0.48);
+    context.strokeStyle = "#fff8ed";
+    context.lineWidth = Math.max(2, radius * 0.25);
+    context.lineCap = "round";
+    context.stroke();
+  }
+
+  function drawDemoCoin(context, x, y, radius) {
+    context.beginPath();
+    context.arc(x, y, radius, 0, Math.PI * 2);
+    context.fillStyle = "#f2b400";
+    context.fill();
+    context.strokeStyle = "#fff0a6";
+    context.lineWidth = 2;
+    context.stroke();
+    context.fillStyle = "#5b3a00";
+    context.font = `800 ${Math.max(10, radius * 1.15)}px sans-serif`;
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText("$", x, y + 1);
+  }
+
+  function drawClearBlockEffect(context, removedBlocks, progress, bounds) {
+    const pulse = Math.sin(clamp(progress / 0.22, 0, 1) * Math.PI);
+    for (const removed of removedBlocks) {
+      const x = removed.x;
+      const y = removed.y;
+      const size = removed.size;
+
+      if (progress < 0.25) {
+        roundedRect(context, x - 5 * pulse, y - 5 * pulse, size + 10 * pulse, size + 10 * pulse, 8);
+        context.strokeStyle = `rgba(250,204,21,${0.25 + pulse * 0.55})`;
+        context.lineWidth = 2 + pulse * 2;
+        context.stroke();
+      }
+
+      const burst = clamp((progress - 0.18) / 0.58, 0, 1);
+      const alpha = Math.max(0, 1 - burst);
+      if (burst > 0 && alpha > 0) {
+        context.globalAlpha = alpha;
+        context.fillStyle = removed.color || (removed.column % 2 === 0 ? "#facc15" : "#fb923c");
+        for (let index = 0; index < 4; index += 1) {
+          const angle = removed.angle + index * Math.PI * 0.5;
+          const drift = removed.drift * burst;
+          const fragmentSize = Math.max(4, size * 0.18);
+          context.fillRect(
+            x + size / 2 + Math.cos(angle) * drift - fragmentSize / 2,
+            y + size / 2 + Math.sin(angle) * drift - size * 0.42 * burst - fragmentSize / 2,
+            fragmentSize,
+            fragmentSize
+          );
+        }
+        context.globalAlpha = 1;
+      }
+    }
+
+    const sweep = clamp((progress - 0.68) / 0.28, 0, 1);
+    if (sweep > 0 && sweep < 1 && removedBlocks.length > 0) {
+      const minY = Math.min(...removedBlocks.map((removed) => removed.y));
+      const maxY = Math.max(...removedBlocks.map((removed) => removed.y));
+      const y = lerp(minY, maxY, sweep);
+      const gradient = context.createLinearGradient(bounds.x, y, bounds.x + bounds.width, y);
+      gradient.addColorStop(0, "rgba(250,204,21,0)");
+      gradient.addColorStop(0.5, "rgba(255,255,255,0.82)");
+      gradient.addColorStop(1, "rgba(250,204,21,0)");
+      context.strokeStyle = gradient;
+      context.lineWidth = 5;
+      context.beginPath();
+      context.moveTo(bounds.x, y);
+      context.lineTo(bounds.x + bounds.width, y);
+      context.stroke();
+    }
+  }
+
   function drawClearToolAnimation(context, rect) {
     if (!clearToolAnimation) {
       return;
@@ -2872,57 +3304,22 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     context.save();
     context.translate(rect.x, rect.y);
-    const pulse = Math.sin(clamp(progress / 0.22, 0, 1) * Math.PI);
-    for (const removed of clearToolAnimation.removedBlocks) {
-      const scaleX = rect.width / GAME_CONFIG.width;
-      const scaleY = rect.height / GAME_CONFIG.height;
-      const x = removed.x * scaleX;
-      const y = removed.y * scaleY;
-      const size = removed.size * scaleX;
-
-      if (progress < 0.25) {
-        roundedRect(context, x - 5 * pulse, y - 5 * pulse, size + 10 * pulse, size + 10 * pulse, 8);
-        context.strokeStyle = `rgba(250,204,21,${0.25 + pulse * 0.55})`;
-        context.lineWidth = 2 + pulse * 2;
-        context.stroke();
-      }
-
-      const burst = clamp((progress - 0.18) / 0.58, 0, 1);
-      const alpha = Math.max(0, 1 - burst);
-      if (burst > 0 && alpha > 0) {
-        context.globalAlpha = alpha;
-        context.fillStyle = removed.block?.column % 2 === 0 ? "#facc15" : "#fb923c";
-        for (let index = 0; index < 4; index += 1) {
-          const angle = removed.angle + index * Math.PI * 0.5;
-          const drift = removed.drift * burst;
-          context.fillRect(
-            x + size / 2 + Math.cos(angle) * drift - 4,
-            y + size / 2 + Math.sin(angle) * drift - 18 * burst - 4,
-            8,
-            8
-          );
-        }
-        context.globalAlpha = 1;
-      }
-    }
-
-    const sweep = clamp((progress - 0.68) / 0.28, 0, 1);
-    if (sweep > 0 && sweep < 1) {
-      const sweepYValues = clearToolAnimation.removedBlocks.map((removed) => removed.y * (rect.height / GAME_CONFIG.height));
-      const minY = Math.min(...sweepYValues);
-      const maxY = Math.max(...sweepYValues);
-      const y = lerp(minY, maxY, sweep);
-      const gradient = context.createLinearGradient(0, y, rect.width, y);
-      gradient.addColorStop(0, "rgba(250,204,21,0)");
-      gradient.addColorStop(0.5, "rgba(255,255,255,0.82)");
-      gradient.addColorStop(1, "rgba(250,204,21,0)");
-      context.strokeStyle = gradient;
-      context.lineWidth = 5;
-      context.beginPath();
-      context.moveTo(0, y);
-      context.lineTo(rect.width, y);
-      context.stroke();
-    }
+    const scaleX = rect.width / GAME_CONFIG.width;
+    const scaleY = rect.height / GAME_CONFIG.height;
+    const displayBlocks = clearToolAnimation.removedBlocks.map((removed) => ({
+      x: removed.x * scaleX,
+      y: removed.y * scaleY,
+      size: removed.size * scaleX,
+      column: removed.block?.column ?? 0,
+      angle: removed.angle,
+      drift: removed.drift
+    }));
+    drawClearBlockEffect(context, displayBlocks, progress, {
+      x: 0,
+      y: 0,
+      width: rect.width,
+      height: rect.height
+    });
 
     context.restore();
   }
@@ -2931,7 +3328,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     const colors = ["#ef4444", "#facc15", "#3b82f6", "#22c55e"];
     const characters = Array.from(texts.title);
     context.save();
-    context.font = "700 48px sans-serif";
+    context.font = menuTitleFont(48, 700);
     context.textAlign = "left";
     context.textBaseline = "alphabetic";
     const widths = characters.map((character) => context.measureText(character).width);
@@ -3070,8 +3467,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     const previousRecordLevel = result?.previousRecordLevel ?? currentRecordLevel();
     const brokeRecord = result?.brokeRecord === true;
     const restartButton = currentButtons().find((button) => button.id === "restart");
+    const doubleCoinsButton = currentButtons().find((button) => button.id === "double-coins-ad");
     const contentTop = panel.y + 82;
-    const contentBottom = restartButton ? restartButton.y - 16 : panel.y + panel.height - 92;
+    const firstActionButton = doubleCoinsButton || restartButton;
+    const contentBottom = firstActionButton ? firstActionButton.y - 16 : panel.y + panel.height - 92;
     const availableHeight = Math.max(116, contentBottom - contentTop);
     const compact = availableHeight < 150;
     const centerX = screenWidth / 2;
@@ -3166,6 +3565,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         drawButton(context, currentButtons().find((button) => button.id === "shop"), texts.shop, false);
         drawButton(context, currentButtons().find((button) => button.id === "leaderboard"), texts.leaderboard, false);
       }
+      drawCoinDoubleAnimation(context, state, rect);
       if (overlay === "shop") {
         drawShopOverlay(context, rect);
         return;
@@ -3225,8 +3625,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     context.fillStyle = "rgba(0,0,0,0.54)";
     context.fillRect(0, 0, screenWidth, screenHeight);
 
-    const gameOverPanelYScale = overlay === "gameover" && continueUsedThisRun ? 0.16 : 0.24;
-    const gameOverPanelHeightScale = overlay === "gameover" && continueUsedThisRun ? 0.68 : 0.54;
+    const gameOverPanelYScale = overlay === "gameover" && continueUsedThisRun ? 0.1 : 0.24;
+    const gameOverPanelHeightScale = overlay === "gameover" && continueUsedThisRun ? 0.78 : 0.54;
     const panelYScale = overlay === "daily-checkin"
       ? 0.04
       : overlay === "confirm-new-run" || overlay === "pause"
@@ -3266,7 +3666,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     context.fillStyle = "#fbfbfb";
     context.textAlign = "center";
-    context.font = "700 32px sans-serif";
+    context.font = menuTitleFont(32, 700);
     const overlayTitle = overlay === "gameover" && !continueUsedThisRun
       ? texts.shareContinueHintOne
       : overlay === "pause"
@@ -3354,14 +3754,15 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
 
     if (overlay === "settings") {
+      const settings = settingsLayout(panel);
       const soundToggleButton = currentButtons().find((button) => button.id === "toggle-sound");
       const vibrationToggleButton = currentButtons().find((button) => button.id === "toggle-vibration");
       context.fillStyle = "rgba(255,255,255,0.72)";
       context.font = "22px sans-serif";
       context.textAlign = "left";
       context.textBaseline = "middle";
-      context.fillText(texts.soundLabel, panel.x + 36, soundToggleButton.y + soundToggleButton.height / 2);
-      context.fillText(texts.vibrationLabel, panel.x + 36, vibrationToggleButton.y + vibrationToggleButton.height / 2);
+      context.fillText(texts.soundLabel, settings.labelX, soundToggleButton.y + soundToggleButton.height / 2);
+      context.fillText(texts.vibrationLabel, settings.labelX, vibrationToggleButton.y + vibrationToggleButton.height / 2);
     }
 
     if (overlay === "gameover") {
@@ -3376,6 +3777,17 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         context.fillText(texts.shareContinueHintThree, screenWidth / 2, lineTop + lineGap);
       } else {
         drawFinalScoreResult(context, panel, gameOverResult, state);
+        if (doubleCoinMessage) {
+          const doubleCoinsButton = currentButtons().find((button) => button.id === "double-coins-ad");
+          context.fillStyle = doubleCoinMessage === DOUBLE_COINS_AD_FAILED_TEXT ? "#fca5a5" : "#facc15";
+          context.font = "700 13px sans-serif";
+          context.textAlign = "center";
+          context.fillText(
+            doubleCoinMessage,
+            screenWidth / 2,
+            doubleCoinsButton ? doubleCoinsButton.y - 7 : panel.y + panel.height - 86
+          );
+        }
       }
     }
 
@@ -3407,6 +3819,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         "settings-done": texts.done,
         "share-continue": texts.shareContinue,
         restart: texts.restart,
+        "double-coins-ad": DOUBLE_COINS_AD_TEXT,
         "confirm-new-continue": texts.continueChallenge,
         "confirm-new-start": texts.startNew,
         "heart-use": texts.useHeart,
@@ -3430,6 +3843,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
           button.id === "confirm-new-start" ||
           button.id === "heart-use" ||
           (button.id === "daily-checkin-ok" && Boolean(pendingCheckIn?.reward)) ||
+          button.id === "double-coins-ad" ||
           button.id === "restart" ||
         button.id === "settings-done"
       );
@@ -3441,6 +3855,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     if (overlay === "daily-checkin") {
       drawDailyClaimAnimation(context, state, rect, panel);
+    }
+    if (screen === "game" && overlay === "gameover") {
+      drawCoinDoubleAnimation(context, state, rect);
     }
   }
 
@@ -3673,8 +4090,11 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         gameOverResult = {
           currentLevel: scoreToLevel(currentScore),
           previousRecordLevel: scoreToLevel(previousBestScore),
-          brokeRecord: currentScore > previousBestScore
+          brokeRecord: currentScore > previousBestScore,
+          coinsEarned: runCoinsEarned,
+          coinDoubled: false
         };
+        doubleCoinMessage = "";
         newRecordCheerPlayed = false;
         resetRecordConfetti();
         overlay = gameOverRecoveryOverlay(finalState);
@@ -3711,6 +4131,17 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     syncBestScore();
     syncCoins();
     syncHearts();
+    if (
+      coinDoubleAnimation &&
+      Date.now() - coinDoubleAnimation.startedAt >= coinDoubleAnimation.duration
+    ) {
+      const amount = coinDoubleAnimation.amount;
+      coinDoubleAnimation = null;
+      game.grantRewards({ coins: amount });
+      storage.saveCoins(game.getState().coins);
+      lastSavedCoins = game.getState().coins;
+      coinSoundPlayer.play();
+    }
     if (
       dailyClaimAnimation &&
       Date.now() - dailyClaimAnimation.startedAt >= dailyClaimAnimation.duration

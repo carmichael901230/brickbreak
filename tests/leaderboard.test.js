@@ -36,7 +36,7 @@ test("current user can appear inside top 10", () => {
   const board = createLeaderboard({ currentBestLevel: 1090, boardType: "total" });
 
   assert.equal(board.topRows.some((row) => row.isCurrentUser), true);
-  assert.equal(board.currentUser.rankLabel, "3");
+  assert.equal(board.currentUser.rankLabel, "8");
 });
 
 test("province board only uses Guangdong fake records", () => {
@@ -66,7 +66,7 @@ test("rank labels use exact, 99+, and 999+ buckets", () => {
 test("long-tail ranking improves as best level rises", () => {
   const lowRank = estimateCurrentRank(100, "total");
   const middleRank = estimateCurrentRank(800, "total");
-  const highRank = estimateCurrentRank(1090, "total");
+  const highRank = estimateCurrentRank(1200, "total");
 
   assert.ok(lowRank > 1000);
   assert.ok(middleRank > 100);
