@@ -68,13 +68,14 @@ const texts = {
   bombPromptTitle: "提示",
   bombDescription: "拖动炸弹到空位，释放后会炸掉周围 3×3 范围内的砖块。",
   bombConfirm: "确认使用",
-  bombShareConfirm: "分享获取",
+  bombAdConfirm: "看广告获取",
   bombLimitDescription: "每局最多使用 3 次炸弹，下一局可重新使用。",
   bombNoBlocks: "附近没有可炸除的砖块",
   bombInvalidPosition: "请选择没有砖块、金币或加球的空位",
   bombCannotPlace: "此处不能放置",
-  bombShareRewarded: "已获得 1 个炸弹",
-  bombShareFailed: "分享暂时不可用，请稍后再试",
+  bombAdLoading: "广告加载中",
+  bombAdRewarded: "已获得 1 个炸弹",
+  bombAdFailed: "广告暂时不可用，请稍后再试",
   claim: "领取",
   newRecord: "新纪录",
   brokePreviousRecord: (level) => `你已突破之前的第 ${level} 关纪录`,
@@ -97,7 +98,8 @@ const CLEAR_TOOL_ROWS = 3;
 const BOMB_MAX_USES_PER_RUN = 3;
 const BOMB_RADIUS = 1;
 const BOMB_ANIMATION_DURATION = 700;
-const CLEAR_TOOL_AD_UNIT_ID = "adunit-fce0dbb1a75742d4";
+const BOMB_DRAG_THRESHOLD = 8;
+const REWARDED_AD_UNIT_ID = "adunit-fce0dbb1a75742d4";
 const ITEM_TRAY_HEIGHT = 86;
 const ITEM_TRAY_GAP = 8;
 const CLEAR_ANIMATION_DURATION = 550;
@@ -410,7 +412,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     volume: 0.78
   });
   const rewardedVideoAd = wxApi.createRewardedVideoAd?.({
-    adUnitId: CLEAR_TOOL_AD_UNIT_ID
+    adUnitId: REWARDED_AD_UNIT_ID
   });
   let lastClearVibrationAt = 0;
 
@@ -508,14 +510,14 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let clearToolDemoStartedAt = 0;
   let clearAdLoading = false;
   let bombFreeItemAvailable = storage.loadBombFreeUsed() !== true;
-  let bombShareItemsThisRun = 0;
+  let bombAdItemsThisRun = 0;
   let bombUsesThisRun = 0;
   let bombToolMessage = "";
   let bombToolDemoStartedAt = 0;
+  let bombAdLoading = false;
   let bombPlacementArmed = false;
   let bombDrag = null;
   let bombAnimation = null;
-  let pendingBombShare = null;
   let rewardedAdPurpose = null;
   let reviveAdLoading = false;
   let doubleCoinMessage = "";
@@ -662,7 +664,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       clearAdItemsThisRun,
       clearUsesThisRun,
       bombFreeItemAvailable,
-      bombShareItemsThisRun,
+      bombAdItemsThisRun,
       bombUsesThisRun,
       snapshot
     };
@@ -751,7 +753,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   function bombToolInventoryCount() {
-    return (bombFreeItemAvailable ? 1 : 0) + bombShareItemsThisRun;
+    return (bombFreeItemAvailable ? 1 : 0) + bombAdItemsThisRun;
   }
 
   function bombToolButtonRect(rect) {
@@ -770,14 +772,11 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     if (bombUsesThisRun >= BOMB_MAX_USES_PER_RUN) {
       return "limit";
     }
-    return bombToolInventoryCount() > 0 ? "use" : "share";
+    return bombToolInventoryCount() > 0 ? "use" : "ad";
   }
 
   function openBombToolPanel() {
     if (bombAnimation || clearToolAnimation) {
-      return;
-    }
-    if (bombToolPanelMode() === "use") {
       return;
     }
     bombToolMessage = "";
@@ -791,8 +790,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       storage.saveBombFreeUsed(true);
       return true;
     }
-    if (bombShareItemsThisRun > 0) {
-      bombShareItemsThisRun -= 1;
+    if (bombAdItemsThisRun > 0) {
+      bombAdItemsThisRun -= 1;
       return true;
     }
     return false;
@@ -800,8 +799,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
   function confirmBombToolUse() {
     const mode = bombToolPanelMode();
-    if (mode === "share") {
-      requestBombShare();
+    if (mode === "ad") {
+      requestBombToolAd();
       return;
     }
     if (mode !== "use") {
@@ -809,40 +808,36 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
 
     bombToolMessage = "";
-    bombPlacementArmed = true;
+    bombPlacementArmed = false;
     overlay = null;
   }
 
-  function requestBombShare() {
-    if (pendingBombShare || bombUsesThisRun >= BOMB_MAX_USES_PER_RUN) {
+  function requestBombToolAd() {
+    if (
+      bombAdLoading ||
+      bombUsesThisRun >= BOMB_MAX_USES_PER_RUN ||
+      rewardedAdPurpose
+    ) {
       return;
     }
 
-    pendingBombShare = { requestedAt: Date.now() };
-    bombToolMessage = "";
-    try {
-      if (typeof wxApi.shareAppMessage !== "function") {
-        throw new Error("share unavailable");
-      }
-      wxApi.shareAppMessage(createSharePayload("bomb-item"));
-    } catch {
-      pendingBombShare = null;
-      bombToolMessage = texts.bombShareFailed;
+    if (!rewardedVideoAd) {
+      bombToolMessage = texts.bombAdFailed;
+      return;
     }
-  }
 
-  function completePendingBombShare() {
-    if (!pendingBombShare) {
-      return false;
-    }
-    pendingBombShare = null;
-    bombShareItemsThisRun += 1;
-    bombToolMessage = "";
-    bombPlacementArmed = false;
-    bombDrag = null;
-    overlay = null;
-    persistProgress(true);
-    return true;
+    bombAdLoading = true;
+    rewardedAdPurpose = "bomb-tool";
+    bombToolMessage = texts.bombAdLoading;
+    const showAd = () => rewardedVideoAd.show?.();
+    Promise.resolve()
+      .then(showAd)
+      .catch(() => Promise.resolve(rewardedVideoAd.load?.()).then(() => rewardedVideoAd.show?.()))
+      .catch(() => {
+        bombAdLoading = false;
+        rewardedAdPurpose = null;
+        bombToolMessage = texts.bombAdFailed;
+      });
   }
 
   function bombCellFromPoint(point) {
@@ -952,6 +947,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       return;
     }
     if (!consumeBombToolItem()) {
+      openBombToolPanel();
       return;
     }
 
@@ -1073,6 +1069,18 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       return;
     }
 
+    if (purpose === "bomb-tool") {
+      bombAdLoading = false;
+      if (completed) {
+        bombAdItemsThisRun += 1;
+        bombToolMessage = texts.bombAdRewarded;
+        persistProgress(true);
+      } else {
+        bombToolMessage = "";
+      }
+      return;
+    }
+
     clearAdLoading = false;
     if (purpose === "clear-tool" && completed) {
       clearAdItemsThisRun += 1;
@@ -1089,6 +1097,11 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     if (purpose === "revive") {
       reviveAdLoading = false;
       doubleCoinMessage = REVIVE_AD_FAILED_TEXT;
+      return;
+    }
+    if (purpose === "bomb-tool") {
+      bombAdLoading = false;
+      bombToolMessage = texts.bombAdFailed;
       return;
     }
     clearAdLoading = false;
@@ -1264,16 +1277,19 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     clearUsesThisRun = Math.max(0, Math.floor(Number(progress.clearUsesThisRun) || 0));
     bombFreeItemAvailable = progress.bombFreeItemAvailable !== false &&
       storage.loadBombFreeUsed() !== true;
-    bombShareItemsThisRun = Math.max(0, Math.floor(Number(progress.bombShareItemsThisRun) || 0));
+    bombAdItemsThisRun = Math.max(
+      0,
+      Math.floor(Number(progress.bombAdItemsThisRun ?? progress.bombShareItemsThisRun) || 0)
+    );
     bombUsesThisRun = Math.max(0, Math.floor(Number(progress.bombUsesThisRun) || 0));
     clearToolMessage = "";
     clearToolAnimation = null;
     clearAdLoading = false;
     bombToolMessage = "";
+    bombAdLoading = false;
     bombPlacementArmed = false;
     bombDrag = null;
     bombAnimation = null;
-    pendingBombShare = null;
     rewardedAdPurpose = null;
     reviveAdLoading = false;
     doubleCoinMessage = "";
@@ -1321,13 +1337,13 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     clearToolAnimation = null;
     clearAdLoading = false;
     bombFreeItemAvailable = storage.loadBombFreeUsed() !== true;
-    bombShareItemsThisRun = 0;
+    bombAdItemsThisRun = 0;
     bombUsesThisRun = 0;
     bombToolMessage = "";
+    bombAdLoading = false;
     bombPlacementArmed = false;
     bombDrag = null;
     bombAnimation = null;
-    pendingBombShare = null;
     game.restart();
     runCoinsEarned = 0;
     hasStartedRun = true;
@@ -3858,7 +3874,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
 
     if (bombToolMessage) {
-      context.fillStyle = bombToolMessage === texts.bombShareFailed ? "#fca5a5" : "#facc15";
+      context.fillStyle = bombToolMessage === texts.bombAdFailed ? "#fca5a5" : "#facc15";
       context.font = "700 14px sans-serif";
       context.fillText(
         bombToolMessage,
@@ -3870,7 +3886,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     if (!confirmButton) {
       return;
     }
-    if (mode === "share") {
+    if (mode === "ad") {
       roundedRect(
         context,
         confirmButton.x,
@@ -3881,7 +3897,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       );
       context.fillStyle = "#f2b400";
       context.fill();
-      const label = texts.bombShareConfirm;
+      const label = texts.bombAdConfirm;
       const iconSize = 24;
       const gap = 8;
       context.font = "700 20px sans-serif";
@@ -4871,14 +4887,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     const button = currentButtons().find((candidate) => hitTest(candidate, point));
     if (button) {
-      if (
-        button.id === "bomb-tool" &&
-        bombToolInventoryCount() > 0 &&
-        bombUsesThisRun < BOMB_MAX_USES_PER_RUN
-      ) {
-        bombPlacementArmed = true;
-        touchStart = { point, buttonId: null, bombDrag: true };
-        startBombDrag(point);
+      if (button.id === "bomb-tool") {
+        touchStart = { point, buttonId: button.id, bombIconGesture: true };
         return;
       }
       touchStart = { point, buttonId: button.id };
@@ -4893,10 +4903,6 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     if (screen !== "game" || overlay !== null) {
       return;
     }
-    if (bombPlacementArmed) {
-      return;
-    }
-
     tutorialIdleTime = 0;
     pointerActive = true;
     touchStart = { point, buttonId: null };
@@ -4909,6 +4915,30 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       if (point) {
         updateBombDrag(point);
       }
+      return;
+    }
+
+    if (touchStart?.bombIconGesture) {
+      const point = getTouchPoint(event);
+      if (!point) {
+        return;
+      }
+      const deltaX = point.x - touchStart.point.x;
+      const deltaY = point.y - touchStart.point.y;
+      if (Math.hypot(deltaX, deltaY) < BOMB_DRAG_THRESHOLD) {
+        return;
+      }
+      if (
+        bombToolInventoryCount() <= 0 ||
+        bombUsesThisRun >= BOMB_MAX_USES_PER_RUN
+      ) {
+        touchStart = null;
+        openBombToolPanel();
+        return;
+      }
+      bombPlacementArmed = true;
+      touchStart = { point, buttonId: null, bombDrag: true };
+      startBombDrag(point);
       return;
     }
 
@@ -4979,6 +5009,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       return;
     }
 
+    if (touchStart?.bombIconGesture) {
+      touchStart = null;
+      openBombToolPanel();
+      return;
+    }
+
     if (touchStart?.buttonId) {
       const button = currentButtons().find((candidate) => candidate.id === touchStart.buttonId);
       if (
@@ -5022,9 +5058,6 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     persistProgress(true);
   });
   wxApi.onShow?.(() => {
-    if (completePendingBombShare()) {
-      return;
-    }
     if (completePendingDoubleCoinShare()) {
       return;
     }
