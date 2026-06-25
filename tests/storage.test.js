@@ -67,6 +67,14 @@ test("storage adapter persists bomb free item usage", () => {
   assert.equal(adapter.loadBombFreeUsed(), true);
 });
 
+test("storage adapter persists freeze free item usage", () => {
+  const storage = createMemoryStorage();
+  const adapter = createStorageAdapter(storage);
+  assert.equal(adapter.loadFreezeFreeUsed(), false);
+  adapter.saveFreezeFreeUsed(true);
+  assert.equal(adapter.loadFreezeFreeUsed(), true);
+});
+
 test("storage adapter persists and loads daily check-in state", () => {
   const storage = createMemoryStorage();
   const adapter = createStorageAdapter(storage);

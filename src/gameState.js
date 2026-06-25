@@ -148,6 +148,7 @@ export function createInitialGameState(config = GAME_CONFIG, coins = 0, skins = 
     balls: [createBall(config.width / 2, arena.launcherY)],
     particles: [],
     heartConsumeEffect: null,
+    freezeActive: false,
     bannerTimer: config.effects.roundBannerTime,
     firstReturnX: null,
     gameOver: false
@@ -327,6 +328,7 @@ export function createGameController({
       coinsOnBoard: gameState.coinsOnBoard,
       balls: gameState.balls,
       particles: gameState.particles,
+      freezeActive: gameState.freezeActive,
       bannerTimer: gameState.bannerTimer,
       firstReturnX: gameState.firstReturnX
     });
@@ -362,6 +364,7 @@ export function createGameController({
     nextState.nextSpeedUpAt = restoreNumber(snapshot.nextSpeedUpAt, nextState.nextSpeedUpAt);
     nextState.speedUpAvailable = restoreBoolean(snapshot.speedUpAvailable, nextState.speedUpAvailable);
     nextState.speedUpUsed = restoreBoolean(snapshot.speedUpUsed, nextState.speedUpUsed);
+    nextState.freezeActive = restoreBoolean(snapshot.freezeActive, false);
     nextState.state = snapshot.state;
     nextState.bannerTimer = restoreNumber(snapshot.bannerTimer, nextState.bannerTimer);
     nextState.firstReturnX = snapshot.firstReturnX === null ? null : restoreNumber(snapshot.firstReturnX, null);
@@ -512,7 +515,7 @@ export function createGameController({
   }
 
   function clearLowestBlockRows(rowCount = 3) {
-    if (gameState.state === "gameover") {
+    if (gameState.state !== "aiming") {
       return { clearedRows: [], removedBlocks: [] };
     }
 
@@ -554,7 +557,7 @@ export function createGameController({
   }
 
   function clearBlocksInArea(centerRow, centerColumn, radius = 1) {
-    if (gameState.state === "gameover") {
+    if (gameState.state !== "aiming") {
       return { removedBlocks: [] };
     }
 
@@ -596,6 +599,15 @@ export function createGameController({
     });
 
     return { removedBlocks };
+  }
+
+  function activateFreeze() {
+    if (gameState.state !== "aiming" || gameState.freezeActive) {
+      return false;
+    }
+
+    gameState.freezeActive = true;
+    return true;
   }
 
   function updateBall(ball, deltaTime) {
@@ -701,7 +713,14 @@ export function createGameController({
     gameState.round += 1;
     gameState.launcherTargetX = gameState.firstReturnX ?? gameState.launcherX;
     syncLauncher();
-    spawnRound();
+    if (gameState.freezeActive) {
+      gameState.freezeActive = false;
+      gameState.bannerTimer = config.effects.roundBannerTime;
+      gameState.score = Math.max(gameState.score, gameState.round - 1);
+      resetRoundEntities();
+    } else {
+      spawnRound();
+    }
     if (!gameState.gameOver) {
       gameState.state = "aiming";
     }
@@ -806,6 +825,7 @@ export function createGameController({
 
   return {
     activateSpeedUp,
+    activateFreeze,
     clearLowestBlockRows,
     clearBlocksInArea,
     consumeHeartContinue,

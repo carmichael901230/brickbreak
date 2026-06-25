@@ -359,6 +359,81 @@ test("round resolves after all balls return and applies collected pickups", () =
   assert.equal(state.state, "aiming");
 });
 
+test("freeze suppresses exactly one board advance and new row", () => {
+  const game = createGameController({
+    boardGenerator: createRoundSequence([
+      {
+        blocks: [{ id: "existing", row: 0, column: 0, hp: 99 }],
+        pickups: [{ id: "pickup", row: 0, column: 1, collected: false }],
+        coins: [{ id: "coin", row: 0, column: 2, collected: false }]
+      },
+      {
+        blocks: [{ id: "skipped", row: 0, column: 3, hp: 2 }],
+        pickups: [],
+        coins: []
+      },
+      {
+        blocks: [{ id: "next", row: 0, column: 4, hp: 3 }],
+        pickups: [],
+        coins: []
+      }
+    ]),
+    audioBus: createSilentAudioBus()
+  });
+
+  assert.equal(game.activateFreeze(), true);
+  const beforeRows = {
+    block: game.getState().blocks[0].row,
+    pickup: game.getState().pickups[0].row,
+    coin: game.getState().coinsOnBoard[0].row
+  };
+  game.getState().returnedBalls = game.getState().ballsOwned;
+  game.getState().state = "resolving";
+  game.update(0.016);
+
+  const frozenRound = game.getState();
+  assert.equal(frozenRound.round, 2);
+  assert.equal(frozenRound.freezeActive, false);
+  assert.equal(frozenRound.state, "aiming");
+  assert.equal(frozenRound.blocks.find((block) => block.id === "existing").row, beforeRows.block);
+  assert.equal(frozenRound.pickups.find((pickup) => pickup.id === "pickup").row, beforeRows.pickup);
+  assert.equal(frozenRound.coinsOnBoard.find((coin) => coin.id === "coin").row, beforeRows.coin);
+  assert.equal(frozenRound.blocks.some((block) => block.id === "skipped"), false);
+  assert.equal(frozenRound.ballsLaunched, 0);
+  assert.equal(frozenRound.returnedBalls, 0);
+
+  frozenRound.returnedBalls = frozenRound.ballsOwned;
+  frozenRound.state = "resolving";
+  game.update(0.016);
+
+  const normalRound = game.getState();
+  assert.equal(normalRound.round, 3);
+  assert.equal(normalRound.blocks.find((block) => block.id === "existing").row, beforeRows.block + 1);
+  assert.equal(normalRound.blocks.some((block) => block.id === "skipped"), true);
+});
+
+test("freeze can only be activated while aiming and survives snapshots", () => {
+  const game = createGameController({
+    boardGenerator: createRoundSequence([{ blocks: [], pickups: [], coins: [] }]),
+    audioBus: createSilentAudioBus()
+  });
+
+  game.getState().state = "launching";
+  assert.equal(game.activateFreeze(), false);
+  game.getState().state = "aiming";
+  assert.equal(game.activateFreeze(), true);
+  assert.equal(game.activateFreeze(), false);
+
+  const snapshot = game.exportSnapshot();
+  assert.equal(snapshot.freezeActive, true);
+  const restored = createGameController({
+    boardGenerator: createRoundSequence([{ blocks: [], pickups: [], coins: [] }]),
+    audioBus: createSilentAudioBus()
+  });
+  assert.equal(restored.importSnapshot(snapshot), true);
+  assert.equal(restored.getState().freezeActive, true);
+});
+
 test("coins are collected on contact and emit a coin event", () => {
   const audioBus = createRecordingAudioBus();
   const game = createGameController({
@@ -410,6 +485,23 @@ test("clearLowestBlockRows removes only the lowest occupied block rows", () => {
   assert.deepEqual(state.pickups.map((pickup) => pickup.id), ["p1"]);
   assert.deepEqual(state.coinsOnBoard.map((coin) => coin.id), ["c1"]);
   assert.equal(result.removedBlocks.length, 3);
+});
+
+test("clear and bomb item effects are rejected during a volley", () => {
+  const game = createGameController({
+    boardGenerator: createRoundSequence([{ blocks: [], pickups: [], coins: [] }]),
+    audioBus: createSilentAudioBus()
+  });
+  const state = game.getState();
+  state.blocks = [
+    { id: "row-clear", row: 6, column: 0, hp: 1 },
+    { id: "bomb-clear", row: 2, column: 2, hp: 1 }
+  ];
+  state.state = "launching";
+
+  assert.deepEqual(game.clearLowestBlockRows(3), { clearedRows: [], removedBlocks: [] });
+  assert.deepEqual(game.clearBlocksInArea(2, 2, 1), { removedBlocks: [] });
+  assert.deepEqual(state.blocks.map((block) => block.id), ["row-clear", "bomb-clear"]);
 });
 
 test("heart count is persistent and restart preserves it", () => {

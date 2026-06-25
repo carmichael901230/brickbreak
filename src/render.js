@@ -265,6 +265,10 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
       const fill = brickSkinColor
         ? darkenSkinColor(brickSkinColor, lifeRatio)
         : `rgba(${mixChannel(74, 200, lifeRatio)}, ${mixChannel(102, 224, lifeRatio)}, ${mixChannel(132, 255, lifeRatio)}, 0.92)`;
+      context.save();
+      if (state.freezeActive) {
+        context.globalAlpha = 0.72;
+      }
       drawBrickSkin(visibleRect, fill, brickSkin, lifeRatio);
 
       if (block.hitFlash > 0) {
@@ -281,6 +285,35 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
       context.textAlign = "center";
       context.textBaseline = "middle";
       context.fillText(String(block.hp), visibleRect.x + visibleRect.size / 2, visibleRect.y + visibleRect.size / 2 + 2);
+
+      if (state.freezeActive) {
+        const { x: brickX, y: brickY, size } = visibleRect;
+        const frost = context.createLinearGradient(brickX, brickY, brickX + size, brickY + size);
+        frost.addColorStop(0, "rgba(224,252,255,0.64)");
+        frost.addColorStop(0.48, "rgba(69,210,255,0.2)");
+        frost.addColorStop(1, "rgba(190,244,255,0.52)");
+        context.fillStyle = frost;
+        context.fillRect(brickX, brickY, size, size);
+        context.globalAlpha = 1;
+        context.strokeStyle = "rgba(214,250,255,0.92)";
+        context.lineWidth = Math.max(2, size * 0.04);
+        context.strokeRect(brickX + 1, brickY + 1, size - 2, size - 2);
+        context.strokeStyle = "rgba(255,255,255,0.62)";
+        context.lineWidth = Math.max(1, size * 0.018);
+        context.beginPath();
+        context.moveTo(brickX + size * 0.12, brickY + size * 0.34);
+        context.lineTo(brickX + size * 0.38, brickY + size * 0.18);
+        context.lineTo(brickX + size * 0.53, brickY + size * 0.42);
+        context.moveTo(brickX + size * 0.62, brickY + size * 0.1);
+        context.lineTo(brickX + size * 0.78, brickY + size * 0.3);
+        context.stroke();
+        context.fillStyle = "#f7fdff";
+        context.font = "700 36px 'Segoe UI'";
+        context.textAlign = "center";
+        context.textBaseline = "middle";
+        context.fillText(String(block.hp), brickX + size / 2, brickY + size / 2 + 2);
+      }
+      context.restore();
     }
   }
 

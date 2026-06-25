@@ -76,6 +76,13 @@ const texts = {
   bombAdLoading: "广告加载中",
   bombAdRewarded: "已获得 1 个炸弹",
   bombAdFailed: "广告暂时不可用，请稍后再试",
+  freezePromptTitle: "冰冻",
+  freezeDescription: "冻结当前棋盘一回合。下一轮砖块不会下移，也不会生成新的一行。",
+  freezeConfirm: "确认使用",
+  freezeShareConfirm: "分享获取",
+  freezeLimitDescription: "每局最多使用 3 次冰冻，下一局可重新使用。",
+  freezeShareFailed: "分享暂时不可用，请稍后再试",
+  freezeShareRewarded: "已获得 1 个冰冻道具",
   claim: "领取",
   newRecord: "新纪录",
   brokePreviousRecord: (level) => `你已突破之前的第 ${level} 关纪录`,
@@ -99,6 +106,8 @@ const BOMB_MAX_USES_PER_RUN = 3;
 const BOMB_RADIUS = 1;
 const BOMB_ANIMATION_DURATION = 700;
 const BOMB_DRAG_THRESHOLD = 8;
+const FREEZE_MAX_USES_PER_RUN = 3;
+const FREEZE_ANIMATION_DURATION = 900;
 const REWARDED_AD_UNIT_ID = "adunit-fce0dbb1a75742d4";
 const ITEM_TRAY_HEIGHT = 86;
 const ITEM_TRAY_GAP = 8;
@@ -359,6 +368,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   const dailyRewardsIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/gift-box.png");
   const clearLinesIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/clear-lines.png");
   const bombItemIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/bomb-item.png");
+  const freezeItemIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/freeze-item.png");
   const adVideoIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/ad-video.png");
   const shareIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/share.png");
   const leaderboardAvatarAssets = Object.fromEntries(
@@ -518,6 +528,13 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let bombPlacementArmed = false;
   let bombDrag = null;
   let bombAnimation = null;
+  let freezeFreeItemAvailable = storage.loadFreezeFreeUsed() !== true;
+  let freezeShareItemsThisRun = 0;
+  let freezeUsesThisRun = 0;
+  let freezeToolMessage = "";
+  let freezeToolDemoStartedAt = 0;
+  let freezeAnimation = null;
+  let pendingFreezeShare = false;
   let rewardedAdPurpose = null;
   let reviveAdLoading = false;
   let doubleCoinMessage = "";
@@ -666,6 +683,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       bombFreeItemAvailable,
       bombAdItemsThisRun,
       bombUsesThisRun,
+      freezeFreeItemAvailable,
+      freezeShareItemsThisRun,
+      freezeUsesThisRun,
       snapshot
     };
   }
@@ -768,6 +788,29 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     };
   }
 
+  function freezeToolInventoryCount() {
+    return (freezeFreeItemAvailable ? 1 : 0) + freezeShareItemsThisRun;
+  }
+
+  function freezeToolButtonRect(rect) {
+    const tray = itemTrayRect(rect);
+    const size = itemToolButtonSize(rect);
+    return {
+      id: "freeze-tool",
+      x: tray.x + (tray.width - size) / 2,
+      y: tray.y + Math.max(0, (tray.height - size) / 2),
+      width: size,
+      height: size
+    };
+  }
+
+  function itemsCanActivate() {
+    return game.getState().state === "aiming" &&
+      !clearToolAnimation &&
+      !bombAnimation &&
+      !freezeAnimation;
+  }
+
   function bombToolPanelMode() {
     if (bombUsesThisRun >= BOMB_MAX_USES_PER_RUN) {
       return "limit";
@@ -776,7 +819,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   function openBombToolPanel() {
-    if (bombAnimation || clearToolAnimation) {
+    if (!itemsCanActivate()) {
       return;
     }
     bombToolMessage = "";
@@ -798,6 +841,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   function confirmBombToolUse() {
+    if (!itemsCanActivate()) {
+      overlay = null;
+      return;
+    }
     const mode = bombToolPanelMode();
     if (mode === "ad") {
       requestBombToolAd();
@@ -946,6 +993,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       bombToolMessage = texts.bombNoBlocks;
       return;
     }
+    if (!itemsCanActivate()) {
+      return;
+    }
     if (!consumeBombToolItem()) {
       openBombToolPanel();
       return;
@@ -969,7 +1019,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   function openClearToolPanel() {
-    if (clearToolAnimation || bombAnimation) {
+    if (!itemsCanActivate()) {
       return;
     }
 
@@ -1008,6 +1058,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   function confirmClearToolUse() {
+    if (!itemsCanActivate()) {
+      overlay = null;
+      return;
+    }
     if (clearToolPanelMode() !== "use") {
       requestClearToolAd();
       return;
@@ -1027,6 +1081,107 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     const result = game.clearLowestBlockRows(CLEAR_TOOL_ROWS);
     startClearToolAnimation(result.removedBlocks);
     overlay = null;
+    persistProgress(true);
+  }
+
+  function freezeToolPanelMode() {
+    if (freezeUsesThisRun >= FREEZE_MAX_USES_PER_RUN) {
+      return "limit";
+    }
+    return freezeToolInventoryCount() > 0 ? "use" : "share";
+  }
+
+  function openFreezeToolPanel() {
+    if (!itemsCanActivate() || game.getState().freezeActive) {
+      return;
+    }
+    bombPlacementArmed = false;
+    bombDrag = null;
+    freezeToolMessage = "";
+    freezeToolDemoStartedAt = Date.now();
+    overlay = "freeze-tool";
+  }
+
+  function consumeFreezeToolItem() {
+    if (freezeFreeItemAvailable) {
+      freezeFreeItemAvailable = false;
+      storage.saveFreezeFreeUsed(true);
+      return true;
+    }
+    if (freezeShareItemsThisRun > 0) {
+      freezeShareItemsThisRun -= 1;
+      return true;
+    }
+    return false;
+  }
+
+  function startFreezeAnimation() {
+    freezeAnimation = {
+      startedAt: Date.now(),
+      duration: FREEZE_ANIMATION_DURATION
+    };
+  }
+
+  function requestFreezeToolShare() {
+    if (
+      pendingFreezeShare ||
+      freezeUsesThisRun >= FREEZE_MAX_USES_PER_RUN ||
+      game.getState().state !== "aiming"
+    ) {
+      return;
+    }
+
+    freezeToolMessage = "";
+    pendingFreezeShare = true;
+    try {
+      if (typeof wxApi.shareAppMessage !== "function") {
+        throw new Error("share unavailable");
+      }
+      wxApi.shareAppMessage(createSharePayload("freeze-tool"));
+    } catch {
+      pendingFreezeShare = false;
+      freezeToolMessage = texts.freezeShareFailed;
+    }
+  }
+
+  function completePendingFreezeShare() {
+    if (!pendingFreezeShare) {
+      return false;
+    }
+
+    pendingFreezeShare = false;
+    if (freezeUsesThisRun >= FREEZE_MAX_USES_PER_RUN) {
+      return false;
+    }
+    freezeShareItemsThisRun += 1;
+    freezeToolMessage = texts.freezeShareRewarded;
+    persistProgress(true);
+    return true;
+  }
+
+  function confirmFreezeToolUse() {
+    if (!itemsCanActivate()) {
+      overlay = null;
+      return;
+    }
+
+    const mode = freezeToolPanelMode();
+    if (mode === "share") {
+      requestFreezeToolShare();
+      return;
+    }
+    if (mode !== "use" || !game.activateFreeze()) {
+      return;
+    }
+    if (!consumeFreezeToolItem()) {
+      game.getState().freezeActive = false;
+      return;
+    }
+
+    freezeUsesThisRun = Math.min(FREEZE_MAX_USES_PER_RUN, freezeUsesThisRun + 1);
+    freezeToolMessage = "";
+    overlay = null;
+    startFreezeAnimation();
     persistProgress(true);
   }
 
@@ -1282,6 +1437,13 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       Math.floor(Number(progress.bombAdItemsThisRun ?? progress.bombShareItemsThisRun) || 0)
     );
     bombUsesThisRun = Math.max(0, Math.floor(Number(progress.bombUsesThisRun) || 0));
+    freezeFreeItemAvailable = progress.freezeFreeItemAvailable !== false &&
+      storage.loadFreezeFreeUsed() !== true;
+    freezeShareItemsThisRun = Math.max(
+      0,
+      Math.floor(Number(progress.freezeShareItemsThisRun) || 0)
+    );
+    freezeUsesThisRun = Math.max(0, Math.floor(Number(progress.freezeUsesThisRun) || 0));
     clearToolMessage = "";
     clearToolAnimation = null;
     clearAdLoading = false;
@@ -1290,6 +1452,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     bombPlacementArmed = false;
     bombDrag = null;
     bombAnimation = null;
+    freezeToolMessage = "";
+    freezeAnimation = null;
+    pendingFreezeShare = false;
     rewardedAdPurpose = null;
     reviveAdLoading = false;
     doubleCoinMessage = "";
@@ -1344,6 +1509,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     bombPlacementArmed = false;
     bombDrag = null;
     bombAnimation = null;
+    freezeFreeItemAvailable = storage.loadFreezeFreeUsed() !== true;
+    freezeShareItemsThisRun = 0;
+    freezeUsesThisRun = 0;
+    freezeToolMessage = "";
+    freezeAnimation = null;
+    pendingFreezeShare = false;
     game.restart();
     runCoinsEarned = 0;
     hasStartedRun = true;
@@ -1814,8 +1985,11 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       });
     }
 
-    if (overlay === null && game.getState().state !== "gameover") {
+    if (overlay === null && itemsCanActivate()) {
       buttons.push(bombToolButtonRect(rect));
+      if (!game.getState().freezeActive) {
+        buttons.push(freezeToolButtonRect(rect));
+      }
       buttons.push(clearToolButtonRect(rect));
     }
 
@@ -1901,6 +2075,26 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       }
     }
 
+    if (overlay === "freeze-tool") {
+      buttons.push({
+        id: "freeze-tool-close",
+        x: clearToolPanel.x + clearToolPanel.width - 44,
+        y: clearToolPanel.y + 20,
+        width: 24,
+        height: 24
+      });
+
+      if (freezeToolPanelMode() !== "limit") {
+        buttons.push({
+          id: "freeze-tool-confirm",
+          x: clearToolPanel.x + 32,
+          y: clearToolPanel.y + clearToolPanel.height - 76,
+          width: clearToolPanel.width - 64,
+          height: 52
+        });
+      }
+    }
+
     if (overlay === "gameover") {
       buttons.push({
         id: "gameover-close",
@@ -1945,7 +2139,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   function handleButton(id) {
     if (
       (coinDoubleAnimation && screen === "game" && overlay === "gameover") ||
-      bombAnimation
+      bombAnimation ||
+      clearToolAnimation ||
+      freezeAnimation
     ) {
       return;
     }
@@ -2053,6 +2249,16 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         break;
       case "bomb-tool-confirm":
         confirmBombToolUse();
+        break;
+      case "freeze-tool":
+        openFreezeToolPanel();
+        break;
+      case "freeze-tool-close":
+        freezeToolMessage = "";
+        overlay = null;
+        break;
+      case "freeze-tool-confirm":
+        confirmFreezeToolUse();
         break;
       case "resume":
         overlay = null;
@@ -3456,13 +3662,13 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   function drawClearToolButton(context, rect) {
-    const button = currentButtons().find((candidate) => candidate.id === "clear-tool");
-    if (!button) {
+    if (overlay !== null || game.getState().state === "gameover") {
       return;
     }
+    const button = clearToolButtonRect(rect);
 
     const count = clearToolInventoryCount();
-    const disabled = clearToolAnimation || bombAnimation ||
+    const disabled = !itemsCanActivate() ||
       clearUsesThisRun >= CLEAR_TOOL_MAX_USES_PER_RUN;
     context.save();
     const iconSize = button.width * 0.9;
@@ -3496,13 +3702,13 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   function drawBombToolButton(context, rect) {
-    const button = currentButtons().find((candidate) => candidate.id === "bomb-tool");
-    if (!button) {
+    if (overlay !== null || game.getState().state === "gameover") {
       return;
     }
+    const button = bombToolButtonRect(rect);
 
     const count = bombToolInventoryCount();
-    const disabled = bombAnimation || bombUsesThisRun >= BOMB_MAX_USES_PER_RUN;
+    const disabled = !itemsCanActivate() || bombUsesThisRun >= BOMB_MAX_USES_PER_RUN;
     const iconSize = button.width * 0.9;
     const iconX = button.x + (button.width - iconSize) / 2;
     const iconY = button.y + (button.height - iconSize) / 2;
@@ -3534,6 +3740,35 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       context.textBaseline = "bottom";
       context.fillText(bombToolMessage, tray.x + tray.width / 2, tray.y - 6);
     }
+    context.restore();
+  }
+
+  function drawFreezeToolButton(context, rect) {
+    if (overlay !== null || game.getState().state === "gameover") {
+      return;
+    }
+    const button = freezeToolButtonRect(rect);
+
+    const count = freezeToolInventoryCount();
+    const disabled = !itemsCanActivate() ||
+      game.getState().freezeActive ||
+      freezeUsesThisRun >= FREEZE_MAX_USES_PER_RUN;
+    const iconSize = button.width * 0.9;
+    const iconX = button.x + (button.width - iconSize) / 2;
+    const iconY = button.y + (button.height - iconSize) / 2;
+    context.save();
+    context.globalAlpha = disabled ? 0.45 : 1;
+    if (freezeItemIconAsset.loaded && freezeItemIconAsset.image) {
+      context.drawImage(freezeItemIconAsset.image, iconX, iconY, iconSize, iconSize);
+    } else {
+      context.fillStyle = "#38d9ff";
+      context.font = `900 ${Math.max(22, iconSize * 0.42)}px sans-serif`;
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText("❄", button.x + button.width / 2, button.y + button.height / 2);
+    }
+    context.globalAlpha = 1;
+    drawItemCountBadge(context, button, count, "#67e8f9");
     context.restore();
   }
 
@@ -3916,6 +4151,149 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     drawButton(context, confirmButton, texts.bombConfirm, true);
   }
 
+  function drawFreezeToolPanel(context, panel) {
+    const mode = freezeToolPanelMode();
+    const confirmButton = currentButtons().find((button) => button.id === "freeze-tool-confirm");
+    const centerX = panel.x + panel.width / 2;
+    drawFreezeToolDemo(context, panel);
+
+    context.fillStyle = "rgba(255,255,255,0.82)";
+    context.font = "16px sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "alphabetic";
+    const lines = mode === "limit"
+      ? ["每局最多使用 3 次冰冻，", "下一局可重新使用。"]
+      : ["冻结当前棋盘一回合，下一轮砖块", "不会下移，也不会生成新的一行。"];
+    for (let index = 0; index < lines.length; index += 1) {
+      context.fillText(lines[index], centerX, panel.y + 218 + index * 24);
+    }
+
+    if (freezeToolMessage) {
+      context.fillStyle = freezeToolMessage === texts.freezeShareFailed ? "#fca5a5" : "#67e8f9";
+      context.font = "700 14px sans-serif";
+      context.fillText(
+        freezeToolMessage,
+        centerX,
+        confirmButton ? confirmButton.y - 16 : panel.y + panel.height - 42
+      );
+    }
+
+    if (!confirmButton) {
+      return;
+    }
+    if (mode === "share") {
+      roundedRect(
+        context,
+        confirmButton.x,
+        confirmButton.y,
+        confirmButton.width,
+        confirmButton.height,
+        24
+      );
+      context.fillStyle = "#67e8f9";
+      context.fill();
+      const label = texts.freezeShareConfirm;
+      const iconSize = 24;
+      const gap = 8;
+      context.font = "700 20px sans-serif";
+      const textWidth = context.measureText(label).width;
+      const contentX = confirmButton.x + (confirmButton.width - iconSize - gap - textWidth) / 2;
+      const centerY = confirmButton.y + confirmButton.height / 2;
+      if (shareIconAsset.loaded && shareIconAsset.image) {
+        context.drawImage(shareIconAsset.image, contentX, centerY - iconSize / 2, iconSize, iconSize);
+      }
+      context.fillStyle = "#10243d";
+      context.textAlign = "left";
+      context.textBaseline = "middle";
+      context.fillText(label, contentX + iconSize + gap, centerY + 1);
+      return;
+    }
+    drawButton(context, confirmButton, texts.freezeConfirm, true);
+  }
+
+  function drawFreezeToolDemo(context, panel) {
+    const demo = {
+      x: panel.x + 24,
+      y: panel.y + 72,
+      width: panel.width - 48,
+      height: 126
+    };
+    const columns = 6;
+    const rows = 4;
+    const gap = 3;
+    const cellSize = Math.min(
+      (demo.width - gap * (columns - 1)) / columns,
+      (demo.height - gap * (rows - 1)) / rows
+    );
+    const boardWidth = cellSize * columns + gap * (columns - 1);
+    const boardHeight = cellSize * rows + gap * (rows - 1);
+    const boardX = demo.x + (demo.width - boardWidth) / 2;
+    const boardY = demo.y + (demo.height - boardHeight) / 2;
+    const cells = [
+      [0, 0, 4], [2, 0, 3], [5, 0, 5],
+      [1, 1, 3], [3, 1, 2], [4, 1, 4],
+      [0, 2, 5], [2, 2, 4], [5, 2, 3],
+      [1, 3, 2], [3, 3, 4], [4, 3, 5]
+    ];
+    const elapsed = Math.max(0, Date.now() - freezeToolDemoStartedAt) % 3200;
+    const freezeProgress = easeOutCubic(clamp((elapsed - 500) / 850, 0, 1));
+    const holdAlpha = clamp((2800 - elapsed) / 400, 0, 1);
+
+    context.save();
+    roundedRect(context, demo.x, demo.y, demo.width, demo.height, 10);
+    context.fillStyle = "#0d2036";
+    context.fill();
+    context.beginPath();
+    roundedRect(context, demo.x, demo.y, demo.width, demo.height, 10);
+    context.clip();
+
+    for (const [column, row, hp] of cells) {
+      const x = boardX + column * (cellSize + gap);
+      const y = boardY + row * (cellSize + gap);
+      roundedRect(context, x, y, cellSize, cellSize, 3);
+      context.fillStyle = row % 2 === 0 ? "#78a6d6" : "#a8c4e5";
+      context.fill();
+      if (freezeProgress > 0) {
+        context.globalAlpha = freezeProgress * holdAlpha * 0.72;
+        const ice = context.createLinearGradient(x, y, x + cellSize, y + cellSize);
+        ice.addColorStop(0, "#e5fbff");
+        ice.addColorStop(0.5, "#35c9ff");
+        ice.addColorStop(1, "#c5f5ff");
+        context.fillStyle = ice;
+        context.fill();
+        context.globalAlpha = 1;
+        context.strokeStyle = `rgba(224,252,255,${freezeProgress * holdAlpha})`;
+        context.lineWidth = 2;
+        context.stroke();
+      }
+      context.fillStyle = "#f5f9ff";
+      context.font = `700 ${Math.max(10, cellSize * 0.42)}px sans-serif`;
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText(String(hp), x + cellSize / 2, y + cellSize / 2 + 1);
+    }
+
+    if (freezeProgress > 0 && freezeProgress < 1) {
+      const sweepY = lerp(demo.y, demo.y + demo.height, freezeProgress);
+      const gradient = context.createLinearGradient(demo.x, sweepY, demo.x + demo.width, sweepY);
+      gradient.addColorStop(0, "rgba(103,232,249,0)");
+      gradient.addColorStop(0.5, "rgba(255,255,255,0.95)");
+      gradient.addColorStop(1, "rgba(103,232,249,0)");
+      context.strokeStyle = gradient;
+      context.lineWidth = 6;
+      context.beginPath();
+      context.moveTo(demo.x, sweepY);
+      context.lineTo(demo.x + demo.width, sweepY);
+      context.stroke();
+    }
+
+    context.fillStyle = `rgba(224,252,255,${0.85 * freezeProgress * holdAlpha})`;
+    context.font = "900 24px sans-serif";
+    context.textAlign = "center";
+    context.fillText("❄", demo.x + demo.width / 2, demo.y + demo.height / 2 + 8);
+    context.restore();
+  }
+
   function drawBombToolDemo(context, panel) {
     const demo = {
       x: panel.x + 24,
@@ -4240,6 +4618,62 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     context.restore();
   }
 
+  function drawFreezeAnimation(context, rect) {
+    if (!freezeAnimation) {
+      return;
+    }
+
+    const elapsed = Date.now() - freezeAnimation.startedAt;
+    const progress = clamp(elapsed / freezeAnimation.duration, 0, 1);
+    if (progress >= 1) {
+      freezeAnimation = null;
+      return;
+    }
+
+    const sweep = easeOutCubic(clamp(progress / 0.68, 0, 1));
+    const fade = 1 - clamp((progress - 0.72) / 0.28, 0, 1);
+    const sweepY = rect.y + rect.height * sweep;
+    context.save();
+    context.beginPath();
+    context.rect(rect.x, rect.y, rect.width, rect.height);
+    context.clip();
+
+    const wash = context.createLinearGradient(rect.x, rect.y, rect.x, sweepY);
+    wash.addColorStop(0, `rgba(186,244,255,${0.28 * fade})`);
+    wash.addColorStop(1, `rgba(56,189,248,${0.12 * fade})`);
+    context.fillStyle = wash;
+    context.fillRect(rect.x, rect.y, rect.width, Math.max(0, sweepY - rect.y));
+
+    const edge = context.createLinearGradient(rect.x, sweepY, rect.x + rect.width, sweepY);
+    edge.addColorStop(0, "rgba(103,232,249,0)");
+    edge.addColorStop(0.5, `rgba(255,255,255,${0.96 * fade})`);
+    edge.addColorStop(1, "rgba(103,232,249,0)");
+    context.strokeStyle = edge;
+    context.lineWidth = 8;
+    context.beginPath();
+    context.moveTo(rect.x, sweepY);
+    context.lineTo(rect.x + rect.width, sweepY);
+    context.stroke();
+
+    context.fillStyle = `rgba(224,252,255,${0.82 * fade})`;
+    context.font = `900 ${clamp(rect.width * 0.12, 34, 58)}px sans-serif`;
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText("❄", rect.x + rect.width / 2, rect.y + rect.height / 2);
+
+    for (let index = 0; index < 18; index += 1) {
+      const seedX = ((index * 47) % 101) / 100;
+      const seedY = ((index * 29) % 97) / 96;
+      const drift = Math.sin(progress * Math.PI * 2 + index) * 8;
+      const x = rect.x + rect.width * seedX + drift;
+      const y = rect.y + rect.height * seedY;
+      const size = 2 + (index % 4);
+      context.globalAlpha = fade * (0.35 + (index % 3) * 0.18);
+      context.fillRect(x - size / 2, y - size / 2, size, size);
+    }
+    context.restore();
+  }
+
   function drawColoredTitle(context, x, y) {
     const colors = ["#ef4444", "#facc15", "#3b82f6", "#22c55e"];
     const characters = Array.from(texts.title);
@@ -4526,10 +4960,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
       drawItemTray(context, rect);
       drawBombToolButton(context, rect);
+      drawFreezeToolButton(context, rect);
       drawClearToolButton(context, rect);
       drawBombPlacement(context, rect);
       drawClearToolAnimation(context, rect);
       drawBombAnimation(context, rect);
+      drawFreezeAnimation(context, rect);
 
       if (shouldShowTutorial(state)) {
         drawTutorialHint(context, rect);
@@ -4572,6 +5008,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
               ? clearToolPanelRect(rect)
               : overlay === "bomb-tool"
                 ? clearToolPanelRect(rect)
+                : overlay === "freeze-tool"
+                  ? clearToolPanelRect(rect)
       : {
           x: rect.x + panelSideInset,
           y: rect.y + rect.height * panelYScale,
@@ -4607,6 +5045,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
                     ? texts.clearPromptTitle
                     : overlay === "bomb-tool"
                       ? texts.bombPromptTitle
+                      : overlay === "freeze-tool"
+                        ? texts.freezePromptTitle
                     : texts.runOver;
     context.fillText(
       overlayTitle,
@@ -4619,7 +5059,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       overlay === "confirm-new-run" ||
       overlay === "leaderboard" ||
       overlay === "clear-tool" ||
-      overlay === "bomb-tool"
+      overlay === "bomb-tool" ||
+      overlay === "freeze-tool"
     ) {
       drawCloseButton(context, currentButtons().find((button) =>
         button.id === (overlay === "gameover"
@@ -4630,6 +5071,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
               ? "clear-tool-close"
               : overlay === "bomb-tool"
                 ? "bomb-tool-close"
+                : overlay === "freeze-tool"
+                  ? "freeze-tool-close"
               : "confirm-new-close")
       ));
     }
@@ -4646,6 +5089,11 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     if (overlay === "bomb-tool") {
       drawBombToolPanel(context, panel);
+      return;
+    }
+
+    if (overlay === "freeze-tool") {
+      drawFreezeToolPanel(context, panel);
       return;
     }
 
@@ -4866,7 +5314,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   function onTouchStart(event) {
-    if (bombAnimation) {
+    if (bombAnimation || clearToolAnimation || freezeAnimation) {
       return;
     }
     const point = getTouchPoint(event);
@@ -5059,6 +5507,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   });
   wxApi.onShow?.(() => {
     if (completePendingDoubleCoinShare()) {
+      return;
+    }
+    if (completePendingFreezeShare()) {
       return;
     }
     if (screen === "menu") {
