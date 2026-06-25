@@ -65,6 +65,16 @@ const texts = {
   clearAdLoading: "广告加载中",
   clearAdFailed: "广告暂时不可用，请稍后再试",
   clearAdRewarded: "已获得 1 个清除道具",
+  bombPromptTitle: "提示",
+  bombDescription: "拖动炸弹到空位，释放后会炸掉周围 3×3 范围内的砖块。",
+  bombConfirm: "确认使用",
+  bombShareConfirm: "分享获取",
+  bombLimitDescription: "每局最多使用 3 次炸弹，下一局可重新使用。",
+  bombNoBlocks: "附近没有可炸除的砖块",
+  bombInvalidPosition: "请选择没有砖块、金币或加球的空位",
+  bombCannotPlace: "此处不能放置",
+  bombShareRewarded: "已获得 1 个炸弹",
+  bombShareFailed: "分享暂时不可用，请稍后再试",
   claim: "领取",
   newRecord: "新纪录",
   brokePreviousRecord: (level) => `你已突破之前的第 ${level} 关纪录`,
@@ -84,11 +94,15 @@ const REVIVE_AD_LOADING_TEXT = "广告加载中";
 const REVIVE_AD_FAILED_TEXT = "广告暂时不可用，请稍后再试";
 const CLEAR_TOOL_MAX_USES_PER_RUN = 3;
 const CLEAR_TOOL_ROWS = 3;
+const BOMB_MAX_USES_PER_RUN = 3;
+const BOMB_RADIUS = 1;
+const BOMB_ANIMATION_DURATION = 700;
 const CLEAR_TOOL_AD_UNIT_ID = "adunit-fce0dbb1a75742d4";
 const ITEM_TRAY_HEIGHT = 86;
 const ITEM_TRAY_GAP = 8;
 const CLEAR_ANIMATION_DURATION = 550;
-const MENU_TITLE_FONT_FAMILY = '"Arial Rounded MT Bold", "YouYuan", "PingFang SC", "Microsoft YaHei", sans-serif';
+const GAME_ROUNDED_FONT_FAMILY = '"YouYuan", "幼圆", "Arial Rounded MT Bold", "PingFang SC", "Microsoft YaHei", sans-serif';
+const POPUP_TITLE_FONT_FAMILY = '"YouYuan", "幼圆", "PingFang SC", "Microsoft YaHei", sans-serif';
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -167,7 +181,15 @@ function easeOutCubic(amount) {
 }
 
 function menuTitleFont(size, weight = 800) {
-  return `${weight} ${size}px ${MENU_TITLE_FONT_FAMILY}`;
+  return `${weight} ${size}px ${GAME_ROUNDED_FONT_FAMILY}`;
+}
+
+function popupTitleFont(size, weight = 700) {
+  return `${weight} ${size}px ${POPUP_TITLE_FONT_FAMILY}`;
+}
+
+function gameHudFont(size, weight = 700) {
+  return `${weight} ${size}px ${GAME_ROUNDED_FONT_FAMILY}`;
 }
 
 function roundedRect(context, x, y, width, height, radius) {
@@ -334,6 +356,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   const confettiIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/confetti.png");
   const dailyRewardsIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/gift-box.png");
   const clearLinesIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/clear-lines.png");
+  const bombItemIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/bomb-item.png");
   const adVideoIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/ad-video.png");
   const shareIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/share.png");
   const leaderboardAvatarAssets = Object.fromEntries(
@@ -382,6 +405,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   });
   const clearRowsSoundPlayer = createSoundPlayer(wxApi, "src/assets/sound/clear.mp3", {
     volume: 0.72
+  });
+  const bombSoundPlayer = createSoundPlayer(wxApi, "src/assets/sound/boom.mp3", {
+    volume: 0.78
   });
   const rewardedVideoAd = wxApi.createRewardedVideoAd?.({
     adUnitId: CLEAR_TOOL_AD_UNIT_ID
@@ -437,6 +463,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     if (type === "clearRows") {
       clearRowsSoundPlayer.play();
     }
+    if (type === "bomb") {
+      bombSoundPlayer.play();
+    }
   });
 
   let screen = "menu";
@@ -478,6 +507,15 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let clearToolAnimation = null;
   let clearToolDemoStartedAt = 0;
   let clearAdLoading = false;
+  let bombFreeItemAvailable = storage.loadBombFreeUsed() !== true;
+  let bombShareItemsThisRun = 0;
+  let bombUsesThisRun = 0;
+  let bombToolMessage = "";
+  let bombToolDemoStartedAt = 0;
+  let bombPlacementArmed = false;
+  let bombDrag = null;
+  let bombAnimation = null;
+  let pendingBombShare = null;
   let rewardedAdPurpose = null;
   let reviveAdLoading = false;
   let doubleCoinMessage = "";
@@ -623,6 +661,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       clearFreeItemAvailable,
       clearAdItemsThisRun,
       clearUsesThisRun,
+      bombFreeItemAvailable,
+      bombShareItemsThisRun,
+      bombUsesThisRun,
       snapshot
     };
   }
@@ -688,16 +729,240 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     return (clearFreeItemAvailable ? 1 : 0) + clearAdItemsThisRun;
   }
 
+  function itemToolButtonSize(rect) {
+    const tray = itemTrayRect(rect);
+    return clamp(
+      Math.min(tray.height * 0.72, rect.width * 0.24),
+      72,
+      108
+    );
+  }
+
   function clearToolButtonRect(rect) {
     const tray = itemTrayRect(rect);
-    const size = clamp(Math.min(tray.height, 82), 64, 82);
+    const size = itemToolButtonSize(rect);
     return {
       id: "clear-tool",
+      x: tray.x + tray.width - 12 - size,
+      y: tray.y + Math.max(0, (tray.height - size) / 2),
+      width: size,
+      height: size
+    };
+  }
+
+  function bombToolInventoryCount() {
+    return (bombFreeItemAvailable ? 1 : 0) + bombShareItemsThisRun;
+  }
+
+  function bombToolButtonRect(rect) {
+    const tray = itemTrayRect(rect);
+    const size = itemToolButtonSize(rect);
+    return {
+      id: "bomb-tool",
       x: tray.x + 12,
       y: tray.y + Math.max(0, (tray.height - size) / 2),
       width: size,
       height: size
     };
+  }
+
+  function bombToolPanelMode() {
+    if (bombUsesThisRun >= BOMB_MAX_USES_PER_RUN) {
+      return "limit";
+    }
+    return bombToolInventoryCount() > 0 ? "use" : "share";
+  }
+
+  function openBombToolPanel() {
+    if (bombAnimation || clearToolAnimation) {
+      return;
+    }
+    if (bombToolPanelMode() === "use") {
+      return;
+    }
+    bombToolMessage = "";
+    bombToolDemoStartedAt = Date.now();
+    overlay = "bomb-tool";
+  }
+
+  function consumeBombToolItem() {
+    if (bombFreeItemAvailable) {
+      bombFreeItemAvailable = false;
+      storage.saveBombFreeUsed(true);
+      return true;
+    }
+    if (bombShareItemsThisRun > 0) {
+      bombShareItemsThisRun -= 1;
+      return true;
+    }
+    return false;
+  }
+
+  function confirmBombToolUse() {
+    const mode = bombToolPanelMode();
+    if (mode === "share") {
+      requestBombShare();
+      return;
+    }
+    if (mode !== "use") {
+      return;
+    }
+
+    bombToolMessage = "";
+    bombPlacementArmed = true;
+    overlay = null;
+  }
+
+  function requestBombShare() {
+    if (pendingBombShare || bombUsesThisRun >= BOMB_MAX_USES_PER_RUN) {
+      return;
+    }
+
+    pendingBombShare = { requestedAt: Date.now() };
+    bombToolMessage = "";
+    try {
+      if (typeof wxApi.shareAppMessage !== "function") {
+        throw new Error("share unavailable");
+      }
+      wxApi.shareAppMessage(createSharePayload("bomb-item"));
+    } catch {
+      pendingBombShare = null;
+      bombToolMessage = texts.bombShareFailed;
+    }
+  }
+
+  function completePendingBombShare() {
+    if (!pendingBombShare) {
+      return false;
+    }
+    pendingBombShare = null;
+    bombShareItemsThisRun += 1;
+    bombToolMessage = "";
+    bombPlacementArmed = false;
+    bombDrag = null;
+    overlay = null;
+    persistProgress(true);
+    return true;
+  }
+
+  function bombCellFromPoint(point) {
+    const rect = canvasRect();
+    if (
+      point.x < rect.x ||
+      point.x > rect.x + rect.width ||
+      point.y < rect.y ||
+      point.y > rect.y + rect.height
+    ) {
+      return null;
+    }
+
+    const gamePoint = toGamePoint(point);
+    const state = game.getState();
+    const maxRow = Math.min(
+      GAME_CONFIG.visibleRows - 1,
+      Math.floor((GAME_CONFIG.height - GAME_CONFIG.topPadding) / state.arena.laneHeight) - 1
+    );
+    const column = Math.floor((gamePoint.x - GAME_CONFIG.sidePadding) / state.arena.blockSize);
+    const row = Math.floor((gamePoint.y - GAME_CONFIG.topPadding) / state.arena.laneHeight);
+    if (
+      column < 0 ||
+      column >= GAME_CONFIG.columns ||
+      row < 0 ||
+      row > maxRow
+    ) {
+      return null;
+    }
+    return { row, column };
+  }
+
+  function isBombCellEmpty(cell) {
+    if (!cell) {
+      return false;
+    }
+    const state = game.getState();
+    const occupiesCell = (entity) =>
+      !entity.collected && entity.row === cell.row && entity.column === cell.column;
+    return !state.blocks.some(occupiesCell) &&
+      !state.pickups.some(occupiesCell) &&
+      !(state.coinsOnBoard ?? []).some(occupiesCell);
+  }
+
+  function bombAreaHasBlocks(cell) {
+    if (!cell) {
+      return false;
+    }
+    return game.getState().blocks.some((block) =>
+      Math.abs(block.row - cell.row) <= BOMB_RADIUS &&
+      Math.abs(block.column - cell.column) <= BOMB_RADIUS
+    );
+  }
+
+  function startBombDrag(point) {
+    bombToolMessage = "";
+    const cell = bombCellFromPoint(point);
+    bombDrag = {
+      point,
+      cell,
+      valid: isBombCellEmpty(cell)
+    };
+  }
+
+  function updateBombDrag(point) {
+    if (!bombDrag) {
+      return;
+    }
+    const cell = bombCellFromPoint(point);
+    bombDrag = {
+      point,
+      cell,
+      valid: isBombCellEmpty(cell)
+    };
+  }
+
+  function startBombAnimation(cell, removedBlocks) {
+    bombAnimation = {
+      startedAt: Date.now(),
+      duration: BOMB_ANIMATION_DURATION,
+      cell,
+      removedBlocks: removedBlocks.map((removed, index) => ({
+        ...removed,
+        angle: (index * 1.73) % (Math.PI * 2)
+      }))
+    };
+  }
+
+  function finishBombDrag() {
+    if (!bombDrag) {
+      return;
+    }
+    const { point, cell, valid } = bombDrag;
+    bombDrag = null;
+    bombPlacementArmed = false;
+    const bombButton = currentButtons().find((button) => button.id === "bomb-tool");
+    if (bombButton && hitTest(bombButton, point)) {
+      bombToolMessage = "";
+      return;
+    }
+    if (!valid) {
+      bombToolMessage = texts.bombInvalidPosition;
+      return;
+    }
+    if (!bombAreaHasBlocks(cell)) {
+      bombToolMessage = texts.bombNoBlocks;
+      return;
+    }
+    if (!consumeBombToolItem()) {
+      return;
+    }
+
+    const result = game.clearBlocksInArea(cell.row, cell.column, BOMB_RADIUS);
+    if (result.removedBlocks.length === 0) {
+      return;
+    }
+    bombUsesThisRun = Math.min(BOMB_MAX_USES_PER_RUN, bombUsesThisRun + 1);
+    bombToolMessage = "";
+    startBombAnimation(cell, result.removedBlocks);
+    persistProgress(true);
   }
 
   function clearToolPanelMode() {
@@ -708,10 +973,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   function openClearToolPanel() {
-    if (clearToolAnimation) {
+    if (clearToolAnimation || bombAnimation) {
       return;
     }
 
+    bombPlacementArmed = false;
+    bombDrag = null;
     clearToolMessage = "";
     clearToolDemoStartedAt = Date.now();
     overlay = "clear-tool";
@@ -995,9 +1262,18 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     clearFreeItemAvailable = progress.clearFreeItemAvailable !== false && storage.loadClearFreeUsed() !== true;
     clearAdItemsThisRun = Math.max(0, Math.floor(Number(progress.clearAdItemsThisRun) || 0));
     clearUsesThisRun = Math.max(0, Math.floor(Number(progress.clearUsesThisRun) || 0));
+    bombFreeItemAvailable = progress.bombFreeItemAvailable !== false &&
+      storage.loadBombFreeUsed() !== true;
+    bombShareItemsThisRun = Math.max(0, Math.floor(Number(progress.bombShareItemsThisRun) || 0));
+    bombUsesThisRun = Math.max(0, Math.floor(Number(progress.bombUsesThisRun) || 0));
     clearToolMessage = "";
     clearToolAnimation = null;
     clearAdLoading = false;
+    bombToolMessage = "";
+    bombPlacementArmed = false;
+    bombDrag = null;
+    bombAnimation = null;
+    pendingBombShare = null;
     rewardedAdPurpose = null;
     reviveAdLoading = false;
     doubleCoinMessage = "";
@@ -1044,6 +1320,14 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     clearToolMessage = "";
     clearToolAnimation = null;
     clearAdLoading = false;
+    bombFreeItemAvailable = storage.loadBombFreeUsed() !== true;
+    bombShareItemsThisRun = 0;
+    bombUsesThisRun = 0;
+    bombToolMessage = "";
+    bombPlacementArmed = false;
+    bombDrag = null;
+    bombAnimation = null;
+    pendingBombShare = null;
     game.restart();
     runCoinsEarned = 0;
     hasStartedRun = true;
@@ -1079,6 +1363,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     overlay = null;
     screen = "menu";
     pointerActive = false;
+    bombPlacementArmed = false;
+    bombDrag = null;
     tutorialIdleTime = 0;
     resetRecordConfetti();
   }
@@ -1093,6 +1379,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     if (!game.continueFromGameOver()) {
       return;
     }
+    audioBus.emit("revive");
 
     screen = "game";
     overlay = null;
@@ -1512,6 +1799,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
 
     if (overlay === null && game.getState().state !== "gameover") {
+      buttons.push(bombToolButtonRect(rect));
       buttons.push(clearToolButtonRect(rect));
     }
 
@@ -1577,6 +1865,26 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       }
     }
 
+    if (overlay === "bomb-tool") {
+      buttons.push({
+        id: "bomb-tool-close",
+        x: clearToolPanel.x + clearToolPanel.width - 44,
+        y: clearToolPanel.y + 20,
+        width: 24,
+        height: 24
+      });
+
+      if (bombToolPanelMode() !== "limit") {
+        buttons.push({
+          id: "bomb-tool-confirm",
+          x: clearToolPanel.x + 32,
+          y: clearToolPanel.y + clearToolPanel.height - 76,
+          width: clearToolPanel.width - 64,
+          height: 52
+        });
+      }
+    }
+
     if (overlay === "gameover") {
       buttons.push({
         id: "gameover-close",
@@ -1619,7 +1927,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   function handleButton(id) {
-    if (coinDoubleAnimation && screen === "game" && overlay === "gameover") {
+    if (
+      (coinDoubleAnimation && screen === "game" && overlay === "gameover") ||
+      bombAnimation
+    ) {
       return;
     }
 
@@ -1698,6 +2009,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         break;
       case "pause":
         if (overlay === null && game.getState().state !== "gameover") {
+          bombPlacementArmed = false;
+          bombDrag = null;
           overlay = "pause";
         }
         break;
@@ -1707,6 +2020,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       case "clear-tool":
         openClearToolPanel();
         break;
+      case "bomb-tool":
+        openBombToolPanel();
+        break;
       case "clear-tool-close":
         clearAdLoading = false;
         clearToolMessage = "";
@@ -1714,6 +2030,13 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         break;
       case "clear-tool-confirm":
         confirmClearToolUse();
+        break;
+      case "bomb-tool-close":
+        bombToolMessage = "";
+        overlay = null;
+        break;
+      case "bomb-tool-confirm":
+        confirmBombToolUse();
         break;
       case "resume":
         overlay = null;
@@ -2677,7 +3000,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     const iconSize = 32;
     const text = String(coins);
     context.save();
-    context.font = "800 26px sans-serif";
+    context.font = gameHudFont(26, 800);
     const textWidth = context.measureText(text).width;
     const totalWidth = iconSize + 6 + textWidth;
     const startX = align === "right" ? x - totalWidth : x;
@@ -2690,11 +3013,11 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       context.fillStyle = "#f2b400";
       context.fill();
       context.fillStyle = "#1d1d1d";
-      context.font = "800 18px sans-serif";
+      context.font = gameHudFont(18, 800);
       context.textAlign = "center";
       context.textBaseline = "middle";
       context.fillText("$", startX + iconSize / 2, y + 1);
-      context.font = "800 26px sans-serif";
+      context.font = gameHudFont(26, 800);
     }
 
     context.fillStyle = "#fbfbfb";
@@ -2708,7 +3031,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     const iconSize = 32;
     const text = String(hearts);
     context.save();
-    context.font = "800 26px sans-serif";
+    context.font = gameHudFont(26, 800);
     const textWidth = context.measureText(text).width;
     const totalWidth = iconSize + 6 + textWidth;
     const startX = align === "right" ? x - totalWidth : x;
@@ -2721,11 +3044,11 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       context.fillStyle = "#ff6f8e";
       context.fill();
       context.fillStyle = "#fbfbfb";
-      context.font = "800 18px sans-serif";
+      context.font = gameHudFont(18, 800);
       context.textAlign = "center";
       context.textBaseline = "middle";
       context.fillText("+", startX + iconSize / 2, y + 1);
-      context.font = "800 26px sans-serif";
+      context.font = gameHudFont(26, 800);
     }
 
     context.fillStyle = "#fbfbfb";
@@ -2944,7 +3267,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     const iconSize = 32;
     const text = type === "coin" ? String(state.coins) : String(state.heartCount);
     context.save();
-    context.font = "800 26px sans-serif";
+    context.font = gameHudFont(26, 800);
     const textWidth = context.measureText(text).width;
     context.restore();
     const totalWidth = iconSize + 6 + textWidth;
@@ -3091,6 +3414,31 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     drawCoinCounter(context, screenWidth - rect.horizontalPadding, rect.topInset + 40, state.coins);
   }
 
+  function drawItemCountBadge(context, button, count, accentColor) {
+    const badgeWidth = clamp(button.width * 0.48, 40, 52);
+    const badgeHeight = clamp(button.height * 0.27, 24, 30);
+    const badgeX = button.x + button.width - badgeWidth * 0.84;
+    const badgeY = button.y + button.height - badgeHeight * 0.86;
+
+    context.save();
+    context.shadowColor = "rgba(0,0,0,0.42)";
+    context.shadowBlur = 6;
+    context.shadowOffsetY = 2;
+    roundedRect(context, badgeX, badgeY, badgeWidth, badgeHeight, badgeHeight / 2);
+    context.fillStyle = count > 0 ? "rgba(8,28,58,0.96)" : "rgba(30,41,59,0.9)";
+    context.fill();
+    context.shadowColor = "transparent";
+    context.strokeStyle = count > 0 ? accentColor : "rgba(148,163,184,0.55)";
+    context.lineWidth = 2;
+    context.stroke();
+    context.fillStyle = count > 0 ? "#ffffff" : "rgba(255,255,255,0.62)";
+    context.font = `900 ${clamp(button.width * 0.17, 14, 18)}px sans-serif`;
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(`×${count}`, badgeX + badgeWidth / 2, badgeY + badgeHeight / 2 + 1);
+    context.restore();
+  }
+
   function drawClearToolButton(context, rect) {
     const button = currentButtons().find((candidate) => candidate.id === "clear-tool");
     if (!button) {
@@ -3098,13 +3446,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
 
     const count = clearToolInventoryCount();
-    const disabled = clearToolAnimation || clearUsesThisRun >= CLEAR_TOOL_MAX_USES_PER_RUN;
-    const tray = itemTrayRect(rect);
+    const disabled = clearToolAnimation || bombAnimation ||
+      clearUsesThisRun >= CLEAR_TOOL_MAX_USES_PER_RUN;
     context.save();
-    roundedRect(context, tray.x, tray.y, tray.width, tray.height, 18);
-    context.fillStyle = "rgba(10,15,35,0.22)";
-    context.fill();
-
     const iconSize = button.width * 0.9;
     const iconX = button.x + (button.width - iconSize) / 2;
     const iconY = button.y + (button.height - iconSize) / 2;
@@ -3122,14 +3466,308 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
     context.globalAlpha = 1;
 
-    roundedRect(context, button.x + button.width - 33, button.y - 8, 40, 28, 14);
-    context.fillStyle = count > 0 ? "#22c55e" : "rgba(255,255,255,0.16)";
+    drawItemCountBadge(context, button, count, "#38bdf8");
+    context.restore();
+  }
+
+  function drawItemTray(context, rect) {
+    const tray = itemTrayRect(rect);
+    context.save();
+    roundedRect(context, tray.x, tray.y, tray.width, tray.height, 18);
+    context.fillStyle = "rgba(10,15,35,0.22)";
     context.fill();
+    context.restore();
+  }
+
+  function drawBombToolButton(context, rect) {
+    const button = currentButtons().find((candidate) => candidate.id === "bomb-tool");
+    if (!button) {
+      return;
+    }
+
+    const count = bombToolInventoryCount();
+    const disabled = bombAnimation || bombUsesThisRun >= BOMB_MAX_USES_PER_RUN;
+    const iconSize = button.width * 0.9;
+    const iconX = button.x + (button.width - iconSize) / 2;
+    const iconY = button.y + (button.height - iconSize) / 2;
+    context.save();
+    context.globalAlpha = disabled ? 0.45 : 1;
+    if (bombItemIconAsset.loaded && bombItemIconAsset.image) {
+      context.drawImage(bombItemIconAsset.image, iconX, iconY, iconSize, iconSize);
+    } else {
+      context.beginPath();
+      context.arc(button.x + button.width / 2, button.y + button.height / 2, iconSize * 0.28, 0, Math.PI * 2);
+      context.fillStyle = "#20283a";
+      context.fill();
+    }
+    context.globalAlpha = 1;
+
+    if (bombPlacementArmed) {
+      roundedRect(context, button.x + 3, button.y + 3, button.width - 6, button.height - 6, 14);
+      context.strokeStyle = "#ef4444";
+      context.lineWidth = 3;
+      context.stroke();
+    }
+
+    drawItemCountBadge(context, button, count, "#ef4444");
+    if (bombPlacementArmed && bombToolMessage) {
+      const tray = itemTrayRect(rect);
+      context.fillStyle = "#fca5a5";
+      context.font = "700 13px sans-serif";
+      context.textAlign = "center";
+      context.textBaseline = "bottom";
+      context.fillText(bombToolMessage, tray.x + tray.width / 2, tray.y - 6);
+    }
+    context.restore();
+  }
+
+  function bombCellScreenRect(rect, row, column) {
+    const state = game.getState();
+    const scaleX = rect.width / GAME_CONFIG.width;
+    const scaleY = rect.height / GAME_CONFIG.height;
+    return {
+      x: rect.x + (GAME_CONFIG.sidePadding + column * state.arena.blockSize) * scaleX,
+      y: rect.y + (GAME_CONFIG.topPadding + row * state.arena.laneHeight) * scaleY,
+      width: state.arena.blockSize * scaleX,
+      height: state.arena.blockSize * scaleY
+    };
+  }
+
+  function drawBombArea(context, rect, cell, valid, alpha = 1) {
+    if (!cell) {
+      return;
+    }
+    const state = game.getState();
+    const maxRow = Math.min(
+      GAME_CONFIG.visibleRows - 1,
+      Math.floor((GAME_CONFIG.height - GAME_CONFIG.topPadding) / state.arena.laneHeight) - 1
+    );
+    context.save();
+    context.beginPath();
+    context.rect(rect.x, rect.y, rect.width, rect.height);
+    context.clip();
+    context.globalAlpha = alpha;
+    const minRow = Math.max(0, cell.row - BOMB_RADIUS);
+    const maxAreaRow = Math.min(maxRow, cell.row + BOMB_RADIUS);
+    const minColumn = Math.max(0, cell.column - BOMB_RADIUS);
+    const maxColumn = Math.min(GAME_CONFIG.columns - 1, cell.column + BOMB_RADIUS);
+    const cells = [];
+    for (let row = minRow; row <= maxAreaRow; row += 1) {
+      for (let column = minColumn; column <= maxColumn; column += 1) {
+        const target = bombCellScreenRect(rect, row, column);
+        cells.push(target);
+        context.fillStyle = valid ? "rgba(239,68,68,0.18)" : "rgba(127,29,29,0.18)";
+        context.fillRect(target.x + 1, target.y + 1, target.width - 2, target.height - 2);
+      }
+    }
+
+    if (cells.length > 0) {
+      const first = cells[0];
+      const last = cells[cells.length - 1];
+      const left = first.x + 1;
+      const top = first.y + 1;
+      const right = last.x + last.width - 1;
+      const bottom = last.y + last.height - 1;
+      context.strokeStyle = valid ? "rgba(255,92,92,0.96)" : "rgba(248,113,113,0.55)";
+      context.lineWidth = 2.5;
+      context.lineCap = "round";
+      context.setLineDash([3, 6]);
+      roundedRect(context, left, top, right - left, bottom - top, 6);
+      context.stroke();
+
+      context.lineWidth = 1.5;
+      context.strokeStyle = valid ? "rgba(255,120,120,0.72)" : "rgba(248,113,113,0.38)";
+      for (let column = minColumn + 1; column <= maxColumn; column += 1) {
+        const boundary = bombCellScreenRect(rect, minRow, column).x;
+        context.beginPath();
+        context.moveTo(boundary, top + 3);
+        context.lineTo(boundary, bottom - 3);
+        context.stroke();
+      }
+      for (let row = minRow + 1; row <= maxAreaRow; row += 1) {
+        const boundary = bombCellScreenRect(rect, row, minColumn).y;
+        context.beginPath();
+        context.moveTo(left + 3, boundary);
+        context.lineTo(right - 3, boundary);
+        context.stroke();
+      }
+      context.setLineDash([]);
+    }
+    context.restore();
+  }
+
+  function drawBombPlacement(context, rect) {
+    if (!bombDrag) {
+      return;
+    }
+    if (bombDrag.valid) {
+      drawBombArea(context, rect, bombDrag.cell, true);
+    } else {
+      drawBombInvalidPlacement(context, rect, bombDrag);
+    }
+    const size = clamp(rect.width * 0.13, 42, 56);
+    const x = bombDrag.point.x - size / 2;
+    const y = bombDrag.point.y - size * 0.82;
+    context.save();
+    context.globalAlpha = bombDrag.valid ? 1 : 0.42;
+    if (bombItemIconAsset.loaded && bombItemIconAsset.image) {
+      context.drawImage(bombItemIconAsset.image, x, y, size, size);
+    }
+    context.restore();
+  }
+
+  function drawBombInvalidPlacement(context, rect, drag) {
+    const target = drag.cell
+      ? bombCellScreenRect(rect, drag.cell.row, drag.cell.column)
+      : null;
+    const markerX = target ? target.x + target.width / 2 : drag.point.x;
+    const markerY = target ? target.y + target.height / 2 : drag.point.y - 26;
+    const markerRadius = target
+      ? clamp(Math.min(target.width, target.height) * 0.28, 14, 22)
+      : 18;
+
+    context.save();
+    context.beginPath();
+    context.rect(rect.x, rect.y, rect.width, rect.height);
+    context.clip();
+
+    if (target) {
+      roundedRect(context, target.x + 2, target.y + 2, target.width - 4, target.height - 4, 6);
+      context.fillStyle = "rgba(127,29,29,0.72)";
+      context.fill();
+      context.strokeStyle = "#f87171";
+      context.lineWidth = 3;
+      context.stroke();
+    }
+
+    context.beginPath();
+    context.arc(markerX, markerY, markerRadius, 0, Math.PI * 2);
+    context.fillStyle = "#dc2626";
+    context.fill();
+    context.strokeStyle = "#ffffff";
+    context.lineWidth = 2;
+    context.stroke();
+
+    const crossInset = markerRadius * 0.45;
+    context.beginPath();
+    context.moveTo(markerX - crossInset, markerY - crossInset);
+    context.lineTo(markerX + crossInset, markerY + crossInset);
+    context.moveTo(markerX + crossInset, markerY - crossInset);
+    context.lineTo(markerX - crossInset, markerY + crossInset);
+    context.strokeStyle = "#ffffff";
+    context.lineWidth = 3;
+    context.lineCap = "round";
+    context.stroke();
+
+    context.font = "700 15px sans-serif";
+    const labelPaddingX = 12;
+    const labelHeight = 30;
+    const labelWidth = context.measureText(texts.bombCannotPlace).width + labelPaddingX * 2;
+    const labelX = clamp(
+      drag.point.x - labelWidth / 2,
+      rect.x + 8,
+      rect.x + rect.width - labelWidth - 8
+    );
+    const preferredLabelY = drag.point.y - markerRadius - 70;
+    const labelY = clamp(
+      preferredLabelY,
+      rect.y + 8,
+      rect.y + rect.height - labelHeight - 8
+    );
+    roundedRect(context, labelX, labelY, labelWidth, labelHeight, 8);
+    context.fillStyle = "rgba(127,29,29,0.96)";
+    context.fill();
+    context.strokeStyle = "rgba(248,113,113,0.92)";
+    context.lineWidth = 1.5;
+    context.stroke();
     context.fillStyle = "#ffffff";
-    context.font = "900 16px sans-serif";
     context.textAlign = "center";
     context.textBaseline = "middle";
-    context.fillText(String(count), button.x + button.width - 13, button.y + 6);
+    context.fillText(texts.bombCannotPlace, labelX + labelWidth / 2, labelY + labelHeight / 2 + 1);
+    context.restore();
+  }
+
+  function drawBombAnimation(context, rect) {
+    if (!bombAnimation) {
+      return;
+    }
+    const elapsed = Date.now() - bombAnimation.startedAt;
+    const progress = clamp(elapsed / bombAnimation.duration, 0, 1);
+    if (progress >= 1) {
+      bombAnimation = null;
+      return;
+    }
+
+    const centerCell = bombCellScreenRect(
+      rect,
+      bombAnimation.cell.row,
+      bombAnimation.cell.column
+    );
+    const centerX = centerCell.x + centerCell.width / 2;
+    const centerY = centerCell.y + centerCell.height / 2;
+    const flash = Math.sin(clamp(progress / 0.32, 0, 1) * Math.PI);
+    const shock = easeOutCubic(clamp((progress - 0.08) / 0.72, 0, 1));
+
+    context.save();
+    drawBombArea(context, rect, bombAnimation.cell, true, Math.max(0, 1 - progress * 1.5));
+    if (progress < 0.2 && bombItemIconAsset.loaded && bombItemIconAsset.image) {
+      const bombScale = 1 + Math.sin((progress / 0.2) * Math.PI) * 0.24;
+      const bombSize = centerCell.width * 0.72 * bombScale;
+      context.drawImage(
+        bombItemIconAsset.image,
+        centerX - bombSize / 2,
+        centerY - bombSize / 2,
+        bombSize,
+        bombSize
+      );
+    }
+    context.beginPath();
+    context.arc(centerX, centerY, lerp(8, centerCell.width * 2.1, shock), 0, Math.PI * 2);
+    context.fillStyle = `rgba(255,120,30,${0.42 * (1 - shock)})`;
+    context.fill();
+    context.strokeStyle = `rgba(255,230,120,${0.9 * (1 - shock)})`;
+    context.lineWidth = lerp(8, 2, shock);
+    context.stroke();
+
+    context.beginPath();
+    context.arc(centerX, centerY, 12 + flash * centerCell.width * 0.72, 0, Math.PI * 2);
+    context.fillStyle = `rgba(255,255,220,${flash * 0.9})`;
+    context.fill();
+
+    const scaleX = rect.width / GAME_CONFIG.width;
+    const scaleY = rect.height / GAME_CONFIG.height;
+    const burst = clamp((progress - 0.12) / 0.68, 0, 1);
+    for (const removed of bombAnimation.removedBlocks) {
+      const x = rect.x + removed.x * scaleX;
+      const y = rect.y + removed.y * scaleY;
+      const size = removed.size * scaleX;
+      context.globalAlpha = Math.max(0, 1 - burst);
+      context.fillStyle = removed.block.column % 2 === 0 ? "#fb923c" : "#ef4444";
+      for (let index = 0; index < 5; index += 1) {
+        const angle = removed.angle + index * (Math.PI * 2 / 5);
+        const distance = burst * (26 + index * 5);
+        const fragment = Math.max(4, size * 0.16);
+        context.fillRect(
+          x + size / 2 + Math.cos(angle) * distance - fragment / 2,
+          y + size / 2 + Math.sin(angle) * distance - 20 * burst - fragment / 2,
+          fragment,
+          fragment
+        );
+      }
+    }
+    context.globalAlpha = Math.max(0, 0.42 - progress * 0.35);
+    context.fillStyle = "#64748b";
+    for (let index = 0; index < 5; index += 1) {
+      context.beginPath();
+      context.arc(
+        centerX + Math.cos(index * 1.35) * progress * 28,
+        centerY - progress * (18 + index * 5),
+        9 + index * 2,
+        0,
+        Math.PI * 2
+      );
+      context.fill();
+    }
     context.restore();
   }
 
@@ -3200,6 +3838,183 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         );
       }
     }
+  }
+
+  function drawBombToolPanel(context, panel) {
+    const mode = bombToolPanelMode();
+    const confirmButton = currentButtons().find((button) => button.id === "bomb-tool-confirm");
+    const centerX = panel.x + panel.width / 2;
+    drawBombToolDemo(context, panel);
+
+    context.fillStyle = "rgba(255,255,255,0.82)";
+    context.font = "16px sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "alphabetic";
+    const lines = mode === "limit"
+      ? ["每局最多使用 3 次炸弹，", "下一局可重新使用。"]
+      : ["拖动炸弹到空位，释放后会炸掉", "周围 3×3 范围内的砖块。"];
+    for (let index = 0; index < lines.length; index += 1) {
+      context.fillText(lines[index], centerX, panel.y + 218 + index * 24);
+    }
+
+    if (bombToolMessage) {
+      context.fillStyle = bombToolMessage === texts.bombShareFailed ? "#fca5a5" : "#facc15";
+      context.font = "700 14px sans-serif";
+      context.fillText(
+        bombToolMessage,
+        centerX,
+        confirmButton ? confirmButton.y - 16 : panel.y + panel.height - 42
+      );
+    }
+
+    if (!confirmButton) {
+      return;
+    }
+    if (mode === "share") {
+      roundedRect(
+        context,
+        confirmButton.x,
+        confirmButton.y,
+        confirmButton.width,
+        confirmButton.height,
+        24
+      );
+      context.fillStyle = "#f2b400";
+      context.fill();
+      const label = texts.bombShareConfirm;
+      const iconSize = 24;
+      const gap = 8;
+      context.font = "700 20px sans-serif";
+      const textWidth = context.measureText(label).width;
+      const contentX = confirmButton.x + (confirmButton.width - iconSize - gap - textWidth) / 2;
+      const centerY = confirmButton.y + confirmButton.height / 2;
+      if (shareIconAsset.loaded && shareIconAsset.image) {
+        context.drawImage(shareIconAsset.image, contentX, centerY - iconSize / 2, iconSize, iconSize);
+      }
+      context.fillStyle = "#1d1d1d";
+      context.textAlign = "left";
+      context.textBaseline = "middle";
+      context.fillText(label, contentX + iconSize + gap, centerY + 1);
+      return;
+    }
+    drawButton(context, confirmButton, texts.bombConfirm, true);
+  }
+
+  function drawBombToolDemo(context, panel) {
+    const demo = {
+      x: panel.x + 24,
+      y: panel.y + 72,
+      width: panel.width - 48,
+      height: 126
+    };
+    const columns = 6;
+    const rows = 4;
+    const gap = 3;
+    const cellSize = Math.min(
+      (demo.width - gap * (columns - 1)) / columns,
+      (demo.height - gap * (rows - 1)) / rows
+    );
+    const boardWidth = cellSize * columns + gap * (columns - 1);
+    const boardHeight = cellSize * rows + gap * (rows - 1);
+    const boardX = demo.x + (demo.width - boardWidth) / 2;
+    const boardY = demo.y + (demo.height - boardHeight) / 2;
+    const target = { row: 2, column: 3 };
+    const cells = [
+      [0, 0, 4], [2, 0, 3], [5, 0, 5],
+      [0, 1, 3], [2, 1, 2], [3, 1, 4],
+      [1, 2, 5], [4, 2, 4],
+      [0, 3, 2], [2, 3, 4], [3, 3, 3], [4, 3, 5], [5, 3, 2]
+    ];
+    const elapsed = Math.max(0, Date.now() - bombToolDemoStartedAt) % 4000;
+    const dragProgress = easeOutCubic(clamp((elapsed - 700) / 1000, 0, 1));
+    const explosionProgress = clamp((elapsed - 1750) / 700, 0, 1);
+    const affected = (row, column) =>
+      Math.abs(row - target.row) <= 1 && Math.abs(column - target.column) <= 1;
+
+    context.save();
+    roundedRect(context, demo.x, demo.y, demo.width, demo.height, 10);
+    context.fillStyle = "#0d2036";
+    context.fill();
+    context.beginPath();
+    roundedRect(context, demo.x, demo.y, demo.width, demo.height, 10);
+    context.clip();
+
+    for (const [column, row, hp] of cells) {
+      if (affected(row, column) && explosionProgress > 0.18) {
+        continue;
+      }
+      const x = boardX + column * (cellSize + gap);
+      const y = boardY + row * (cellSize + gap);
+      roundedRect(context, x, y, cellSize, cellSize, 3);
+      context.fillStyle = row % 2 === 0 ? "#78a6d6" : "#a8c4e5";
+      context.fill();
+      context.strokeStyle = "rgba(255,255,255,0.2)";
+      context.stroke();
+      context.fillStyle = "#f5f9ff";
+      context.font = `700 ${Math.max(10, cellSize * 0.42)}px sans-serif`;
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText(String(hp), x + cellSize / 2, y + cellSize / 2 + 1);
+    }
+
+    drawDemoCoin(
+      context,
+      boardX + 2 * (cellSize + gap) + cellSize / 2,
+      boardY + 2 * (cellSize + gap) + cellSize / 2,
+      cellSize * 0.3
+    );
+    drawDemoAddBall(
+      context,
+      boardX + 4 * (cellSize + gap) + cellSize / 2,
+      boardY + (cellSize + gap) + cellSize / 2,
+      cellSize * 0.28
+    );
+
+    const startX = boardX + cellSize * 0.2;
+    const startY = demo.y + demo.height - cellSize * 0.15;
+    const endX = boardX + target.column * (cellSize + gap) + cellSize / 2;
+    const endY = boardY + target.row * (cellSize + gap) + cellSize / 2;
+    const bombX = lerp(startX, endX, dragProgress);
+    const bombY = lerp(startY, endY, dragProgress);
+    if (dragProgress > 0.15 && explosionProgress < 0.12) {
+      const dragTarget = {
+        row: dragProgress < 0.55 ? 3 : 2,
+        column: dragProgress < 0.45 ? 1 : dragProgress < 0.75 ? 2 : 3
+      };
+      context.fillStyle = "rgba(239,68,68,0.22)";
+      context.strokeStyle = "rgba(255,90,90,0.9)";
+      context.lineWidth = 1.5;
+      context.lineCap = "round";
+      context.setLineDash([2, 4]);
+      for (let row = Math.max(0, dragTarget.row - 1);
+        row <= Math.min(rows - 1, dragTarget.row + 1);
+        row += 1) {
+        for (let column = Math.max(0, dragTarget.column - 1);
+          column <= Math.min(columns - 1, dragTarget.column + 1);
+          column += 1) {
+          const x = boardX + column * (cellSize + gap);
+          const y = boardY + row * (cellSize + gap);
+          context.fillRect(x, y, cellSize, cellSize);
+          context.strokeRect(x, y, cellSize, cellSize);
+        }
+      }
+      context.setLineDash([]);
+    }
+    if (explosionProgress < 0.18 && bombItemIconAsset.loaded && bombItemIconAsset.image) {
+      const size = cellSize * 0.95;
+      context.drawImage(bombItemIconAsset.image, bombX - size / 2, bombY - size / 2, size, size);
+    }
+    if (explosionProgress > 0 && explosionProgress < 1) {
+      const shock = easeOutCubic(explosionProgress);
+      context.beginPath();
+      context.arc(endX, endY, lerp(4, cellSize * 2, shock), 0, Math.PI * 2);
+      context.fillStyle = `rgba(255,120,30,${0.48 * (1 - shock)})`;
+      context.fill();
+      context.strokeStyle = `rgba(255,245,180,${0.9 * (1 - shock)})`;
+      context.lineWidth = 4;
+      context.stroke();
+    }
+    context.restore();
   }
 
   function drawClearToolDemo(context, panel) {
@@ -3662,19 +4477,19 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     if (screen !== "menu") {
       context.fillStyle = "rgba(255,255,255,0.72)";
-      context.font = "15px sans-serif";
+      context.font = gameHudFont(15, 700);
       context.textAlign = "left";
       context.fillText(texts.best, rect.horizontalPadding + 58, rect.topInset + 16);
       context.fillStyle = "#fbfbfb";
-      context.font = "700 42px sans-serif";
+      context.font = gameHudFont(42, 700);
       context.fillText(String(bestScore), rect.horizontalPadding + 58, rect.topInset + 54);
 
       context.textAlign = "center";
       context.fillStyle = "rgba(255,255,255,0.72)";
-      context.font = "15px sans-serif";
+      context.font = gameHudFont(15, 700);
       context.fillText(texts.round, screenWidth / 2, rect.topInset + 16);
       context.fillStyle = "#fbfbfb";
-      context.font = "700 42px sans-serif";
+      context.font = gameHudFont(42, 700);
       context.fillText(String(state.round), screenWidth / 2, rect.topInset + 54);
       drawTopRightResourceCounters(context, rect, state);
 
@@ -3693,8 +4508,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         drawButton(context, speedButton, texts.speed);
       }
 
+      drawItemTray(context, rect);
+      drawBombToolButton(context, rect);
       drawClearToolButton(context, rect);
+      drawBombPlacement(context, rect);
       drawClearToolAnimation(context, rect);
+      drawBombAnimation(context, rect);
 
       if (shouldShowTutorial(state)) {
         drawTutorialHint(context, rect);
@@ -3735,6 +4554,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
             ? settingsPanelRect(rect)
             : overlay === "clear-tool"
               ? clearToolPanelRect(rect)
+              : overlay === "bomb-tool"
+                ? clearToolPanelRect(rect)
       : {
           x: rect.x + panelSideInset,
           y: rect.y + rect.height * panelYScale,
@@ -3751,7 +4572,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     context.fillStyle = "#fbfbfb";
     context.textAlign = "center";
-    context.font = menuTitleFont(32, 700);
+    context.font = popupTitleFont(32);
     const overlayTitle = overlay === "gameover" && !continueUsedThisRun
       ? texts.shareContinueHintOne
       : overlay === "pause"
@@ -3768,6 +4589,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
                   ? texts.leaderboard
                   : overlay === "clear-tool"
                     ? texts.clearPromptTitle
+                    : overlay === "bomb-tool"
+                      ? texts.bombPromptTitle
                     : texts.runOver;
     context.fillText(
       overlayTitle,
@@ -3775,7 +4598,13 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       panel.y + 48
     );
 
-    if (overlay === "gameover" || overlay === "confirm-new-run" || overlay === "leaderboard" || overlay === "clear-tool") {
+    if (
+      overlay === "gameover" ||
+      overlay === "confirm-new-run" ||
+      overlay === "leaderboard" ||
+      overlay === "clear-tool" ||
+      overlay === "bomb-tool"
+    ) {
       drawCloseButton(context, currentButtons().find((button) =>
         button.id === (overlay === "gameover"
           ? "gameover-close"
@@ -3783,6 +4612,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
             ? "leaderboard-close"
             : overlay === "clear-tool"
               ? "clear-tool-close"
+              : overlay === "bomb-tool"
+                ? "bomb-tool-close"
               : "confirm-new-close")
       ));
     }
@@ -3794,6 +4625,11 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     if (overlay === "clear-tool") {
       drawClearToolPanel(context, panel);
+      return;
+    }
+
+    if (overlay === "bomb-tool") {
+      drawBombToolPanel(context, panel);
       return;
     }
 
@@ -4014,6 +4850,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   function onTouchStart(event) {
+    if (bombAnimation) {
+      return;
+    }
     const point = getTouchPoint(event);
     if (!point) {
       return;
@@ -4032,6 +4871,16 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     const button = currentButtons().find((candidate) => hitTest(candidate, point));
     if (button) {
+      if (
+        button.id === "bomb-tool" &&
+        bombToolInventoryCount() > 0 &&
+        bombUsesThisRun < BOMB_MAX_USES_PER_RUN
+      ) {
+        bombPlacementArmed = true;
+        touchStart = { point, buttonId: null, bombDrag: true };
+        startBombDrag(point);
+        return;
+      }
       touchStart = { point, buttonId: button.id };
       return;
     }
@@ -4044,6 +4893,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     if (screen !== "game" || overlay !== null) {
       return;
     }
+    if (bombPlacementArmed) {
+      return;
+    }
 
     tutorialIdleTime = 0;
     pointerActive = true;
@@ -4052,6 +4904,14 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   function onTouchMove(event) {
+    if (bombDrag) {
+      const point = getTouchPoint(event);
+      if (point) {
+        updateBombDrag(point);
+      }
+      return;
+    }
+
     if (screen === "menu" && overlay === "shop" && touchStart) {
       const point = getTouchPoint(event);
       if (!point) {
@@ -4112,6 +4972,13 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       return;
     }
 
+    if (bombDrag) {
+      updateBombDrag(point);
+      finishBombDrag();
+      touchStart = null;
+      return;
+    }
+
     if (touchStart?.buttonId) {
       const button = currentButtons().find((candidate) => candidate.id === touchStart.buttonId);
       if (
@@ -4146,6 +5013,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   wxApi.onTouchEnd(onTouchEnd);
   wxApi.onTouchCancel(() => {
     pointerActive = false;
+    bombPlacementArmed = false;
+    bombDrag = null;
     touchStart = null;
     leaderboardDragging = false;
   });
@@ -4153,6 +5022,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     persistProgress(true);
   });
   wxApi.onShow?.(() => {
+    if (completePendingBombShare()) {
+      return;
+    }
     if (completePendingDoubleCoinShare()) {
       return;
     }
@@ -4182,6 +5054,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
       game.update(deltaTime);
       if (game.getState().state === "gameover") {
+        bombPlacementArmed = false;
+        bombDrag = null;
         const finalState = game.getState();
         const previousBestScore = runStartBestScore;
         const currentScore = Math.max(0, Math.floor(finalState.score));

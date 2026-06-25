@@ -215,5 +215,6 @@ export const STORAGE_KEYS = {
   settings: "arc-cascade-settings",
   gameProgress: "arc-cascade-game-progress",
   dailyCheckIn: "arc-cascade-daily-check-in",
-  clearFreeUsed: "arc-cascade-clear-free-used"
+  clearFreeUsed: "arc-cascade-clear-free-used",
+  bombFreeUsed: "arc-cascade-bomb-free-used"
 };

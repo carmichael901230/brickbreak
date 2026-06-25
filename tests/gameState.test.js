@@ -96,6 +96,61 @@ test("clearLowestBlockRows removes only the lowest occupied block rows", () => {
   assert.equal(result.removedBlocks.length, 3);
 });
 
+test("clearBlocksInArea removes bricks in a clipped 3x3 area only", () => {
+  const game = createGameController({
+    boardGenerator: createBoardGenerator([{ blocks: [], pickups: [], coins: [] }]),
+    audioBus: createAudioBus()
+  });
+  const state = game.getState();
+  state.blocks = [
+    { id: "center", row: 2, column: 2, hp: 1 },
+    { id: "near", row: 3, column: 3, hp: 1 },
+    { id: "far", row: 4, column: 4, hp: 1 },
+    { id: "edge", row: 0, column: 0, hp: 1 }
+  ];
+  state.pickups = [{ id: "p1", row: 2, column: 3, collected: false }];
+  state.coinsOnBoard = [{ id: "c1", row: 1, column: 1, collected: false }];
+
+  const result = game.clearBlocksInArea(2, 2, 1);
+
+  assert.deepEqual(result.removedBlocks.map((removed) => removed.block.id), ["center", "near"]);
+  assert.deepEqual(state.blocks.map((block) => block.id), ["far", "edge"]);
+  assert.deepEqual(state.pickups.map((pickup) => pickup.id), ["p1"]);
+  assert.deepEqual(state.coinsOnBoard.map((coin) => coin.id), ["c1"]);
+});
+
+test("clearBlocksInArea handles board edges", () => {
+  const game = createGameController({
+    boardGenerator: createBoardGenerator([{ blocks: [], pickups: [], coins: [] }]),
+    audioBus: createAudioBus()
+  });
+  const state = game.getState();
+  state.blocks = [
+    { id: "corner", row: 0, column: 0, hp: 1 },
+    { id: "neighbor", row: 1, column: 1, hp: 1 },
+    { id: "outside", row: 2, column: 2, hp: 1 }
+  ];
+
+  const result = game.clearBlocksInArea(0, 0, 1);
+
+  assert.equal(result.removedBlocks.length, 2);
+  assert.deepEqual(state.blocks.map((block) => block.id), ["outside"]);
+});
+
+test("clearBlocksInArea leaves state unchanged when no bricks are affected", () => {
+  const game = createGameController({
+    boardGenerator: createBoardGenerator([{ blocks: [], pickups: [], coins: [] }]),
+    audioBus: createAudioBus()
+  });
+  const state = game.getState();
+  state.blocks = [{ id: "far", row: 5, column: 5, hp: 1 }];
+
+  const result = game.clearBlocksInArea(0, 0, 1);
+
+  assert.deepEqual(result.removedBlocks, []);
+  assert.deepEqual(state.blocks.map((block) => block.id), ["far"]);
+});
+
 test("low launch angles hide the guide and do not fire", () => {
   const game = createGameController({
     boardGenerator: createBoardGenerator([

@@ -186,6 +186,22 @@ export function createStorageAdapter(storage = globalThis.localStorage) {
       storage.setItem(STORAGE_KEYS.clearFreeUsed, used ? "true" : "false");
     },
 
+    loadBombFreeUsed() {
+      if (!storage) {
+        return false;
+      }
+
+      return storage.getItem(STORAGE_KEYS.bombFreeUsed) === "true";
+    },
+
+    saveBombFreeUsed(used) {
+      if (!storage) {
+        return;
+      }
+
+      storage.setItem(STORAGE_KEYS.bombFreeUsed, used ? "true" : "false");
+    },
+
     clearGameProgress() {
       if (!storage) {
         return;

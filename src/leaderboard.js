@@ -9,26 +9,26 @@ export const PROVINCE_PLAYER_COUNT = 28000;
 export const TOP_RECORD_LEVEL = 1219;
 
 export const FAKE_LEADERBOARD_USERS = [
-  { id: "nora-lin", nickname: "林小雨", province: "浙江", city: "杭州", country: "中国", avatar: "src/assets/pic/avatars/avatar-01.png", bestLevel: 1219 },
-  { id: "jason-qiu", nickname: "QiuJason", province: "上海", city: "上海", country: "中国", avatar: "src/assets/pic/avatars/avatar-02.png", bestLevel: 1107 },
-  { id: "guangdong-yan", nickname: "阿Yan", province: "广东", city: "广州", country: "中国", avatar: "src/assets/pic/avatars/avatar-04.png", bestLevel: 1169 },
-  { id: "mika-chen", nickname: "陈Mika", province: "北京", city: "北京", country: "中国", avatar: "src/assets/pic/avatars/avatar-03.png", bestLevel: 1165 },
-  { id: "sarah-he", nickname: "何小敏", province: "四川", city: "成都", country: "中国", avatar: "src/assets/pic/avatars/avatar-05.png", bestLevel: 1152 },
-  { id: "guangdong-mo", nickname: "可可_深圳", province: "广东", city: "深圳", country: "中国", avatar: "src/assets/pic/avatars/avatar-06.png", bestLevel: 1051 },
-  { id: "leo-wen", nickname: "Leo文", province: "江苏", city: "南京", country: "中国", avatar: "src/assets/pic/avatars/avatar-07.png", bestLevel: 1106 },
-  { id: "guangdong-luo", nickname: "罗阿杰", province: "广东", city: "佛山", country: "中国", avatar: "src/assets/pic/avatars/avatar-08.png", bestLevel: 1109 },
-  { id: "amy-tang", nickname: "Amy唐", province: "福建", city: "厦门", country: "中国", avatar: "src/assets/pic/avatars/avatar-09.png", bestLevel: 1010 },
-  { id: "owen-xu", nickname: "徐同学", province: "山东", city: "青岛", country: "中国", avatar: "src/assets/pic/avatars/avatar-10.png", bestLevel: 1040 },
-  { id: "guangdong-zhao", nickname: "赵先生", province: "广东", city: "东莞", country: "中国", avatar: "src/assets/pic/avatars/avatar-11.png", bestLevel: 1052 },
-  { id: "ivy-jiang", nickname: "Jiang Ivy", province: "湖南", city: "长沙", country: "中国", avatar: "src/assets/pic/avatars/avatar-12.png", bestLevel: 1032 },
-  { id: "guangdong-ye", nickname: "叶子", province: "广东", city: "珠海", country: "中国", avatar: "src/assets/pic/avatars/avatar-13.png", bestLevel: 967 },
-  { id: "max-han", nickname: "韩小北", province: "湖北", city: "武汉", country: "中国", avatar: "src/assets/pic/avatars/avatar-14.png", bestLevel: 988 },
-  { id: "guangdong-su", nickname: "苏打", province: "广东", city: "汕头", country: "中国", avatar: "src/assets/pic/avatars/avatar-15.png", bestLevel: 941 },
-  { id: "ella-zhou", nickname: "周甜甜", province: "河南", city: "郑州", country: "中国", avatar: "src/assets/pic/avatars/avatar-16.png", bestLevel: 944 },
-  { id: "guangdong-fang", nickname: "方可乐", province: "广东", city: "惠州", country: "中国", avatar: "src/assets/pic/avatars/avatar-17.png", bestLevel: 867 },
-  { id: "guangdong-xie", nickname: "谢小满", province: "广东", city: "中山", country: "中国", avatar: "src/assets/pic/avatars/avatar-18.png", bestLevel: 850 },
-  { id: "guangdong-lin", nickname: "Lin知夏", province: "广东", city: "江门", country: "中国", avatar: "src/assets/pic/avatars/avatar-19.png", bestLevel: 800 },
-  { id: "guangdong-yu", nickname: "阿Yu", province: "广东", city: "湛江", country: "中国", avatar: "src/assets/pic/avatars/avatar-20.png", bestLevel: 806 }
+  { id: "nora-lin", nickname: "林小雨", province: "浙江", city: "杭州", country: "中国", avatar: "src/assets/pic/avatars/avatar-01.png", bestLevel: 1304 },
+  { id: "jason-qiu", nickname: "QiuJason", province: "上海", city: "上海", country: "中国", avatar: "src/assets/pic/avatars/avatar-02.png", bestLevel: 1184 },
+  { id: "guangdong-yan", nickname: "阿Yan", province: "广东", city: "广州", country: "中国", avatar: "src/assets/pic/avatars/avatar-04.png", bestLevel: 1251 },
+  { id: "mika-chen", nickname: "陈Mika", province: "北京", city: "北京", country: "中国", avatar: "src/assets/pic/avatars/avatar-03.png", bestLevel: 1247 },
+  { id: "sarah-he", nickname: "何小敏", province: "四川", city: "成都", country: "中国", avatar: "src/assets/pic/avatars/avatar-05.png", bestLevel: 1233 },
+  { id: "guangdong-mo", nickname: "可可_深圳", province: "广东", city: "深圳", country: "中国", avatar: "src/assets/pic/avatars/avatar-06.png", bestLevel: 1125 },
+  { id: "leo-wen", nickname: "Leo文", province: "江苏", city: "南京", country: "中国", avatar: "src/assets/pic/avatars/avatar-07.png", bestLevel: 1183 },
+  { id: "guangdong-luo", nickname: "罗阿杰", province: "广东", city: "佛山", country: "中国", avatar: "src/assets/pic/avatars/avatar-08.png", bestLevel: 1187 },
+  { id: "amy-tang", nickname: "Amy唐", province: "福建", city: "厦门", country: "中国", avatar: "src/assets/pic/avatars/avatar-09.png", bestLevel: 1081 },
+  { id: "owen-xu", nickname: "徐同学", province: "山东", city: "青岛", country: "中国", avatar: "src/assets/pic/avatars/avatar-10.png", bestLevel: 1113 },
+  { id: "guangdong-zhao", nickname: "赵先生", province: "广东", city: "东莞", country: "中国", avatar: "src/assets/pic/avatars/avatar-11.png", bestLevel: 1126 },
+  { id: "ivy-jiang", nickname: "Jiang Ivy", province: "湖南", city: "长沙", country: "中国", avatar: "src/assets/pic/avatars/avatar-12.png", bestLevel: 1104 },
+  { id: "guangdong-ye", nickname: "叶子", province: "广东", city: "珠海", country: "中国", avatar: "src/assets/pic/avatars/avatar-13.png", bestLevel: 1035 },
+  { id: "max-han", nickname: "韩小北", province: "湖北", city: "武汉", country: "中国", avatar: "src/assets/pic/avatars/avatar-14.png", bestLevel: 1057 },
+  { id: "guangdong-su", nickname: "苏打", province: "广东", city: "汕头", country: "中国", avatar: "src/assets/pic/avatars/avatar-15.png", bestLevel: 1007 },
+  { id: "ella-zhou", nickname: "周甜甜", province: "河南", city: "郑州", country: "中国", avatar: "src/assets/pic/avatars/avatar-16.png", bestLevel: 1010 },
+  { id: "guangdong-fang", nickname: "方可乐", province: "广东", city: "惠州", country: "中国", avatar: "src/assets/pic/avatars/avatar-17.png", bestLevel: 928 },
+  { id: "guangdong-xie", nickname: "谢小满", province: "广东", city: "中山", country: "中国", avatar: "src/assets/pic/avatars/avatar-18.png", bestLevel: 910 },
+  { id: "guangdong-lin", nickname: "Lin知夏", province: "广东", city: "江门", country: "中国", avatar: "src/assets/pic/avatars/avatar-19.png", bestLevel: 856 },
+  { id: "guangdong-yu", nickname: "阿Yu", province: "广东", city: "湛江", country: "中国", avatar: "src/assets/pic/avatars/avatar-20.png", bestLevel: 862 }
 ];
 
 const CURRENT_USER = {

@@ -553,6 +553,51 @@ export function createGameController({
     return { clearedRows, removedBlocks };
   }
 
+  function clearBlocksInArea(centerRow, centerColumn, radius = 1) {
+    if (gameState.state === "gameover") {
+      return { removedBlocks: [] };
+    }
+
+    const row = Math.floor(Number(centerRow));
+    const column = Math.floor(Number(centerColumn));
+    const normalizedRadius = Math.max(0, Math.floor(Number(radius) || 0));
+    if (!Number.isFinite(row) || !Number.isFinite(column)) {
+      return { removedBlocks: [] };
+    }
+
+    const removedBlocks = gameState.blocks
+      .filter((block) =>
+        Math.abs(block.row - row) <= normalizedRadius &&
+        Math.abs(block.column - column) <= normalizedRadius
+      )
+      .map((block) => {
+        const position = getEntityPosition(gameState.arena, config, block);
+        return {
+          block: cloneSerializable(block),
+          x: position.x,
+          y: position.y,
+          size: gameState.arena.blockSize
+        };
+      });
+
+    if (removedBlocks.length === 0) {
+      return { removedBlocks: [] };
+    }
+
+    const removedIds = new Set(removedBlocks.map((removed) => removed.block.id));
+    gameState.blocks = gameState.blocks.filter((block) => !removedIds.has(block.id));
+    for (const removed of removedBlocks) {
+      addParticle(removed.x + removed.size / 2, removed.y + removed.size / 2, "clear");
+    }
+    audioBus.emit("bomb", {
+      row,
+      column,
+      count: removedBlocks.length
+    });
+
+    return { removedBlocks };
+  }
+
   function updateBall(ball, deltaTime) {
     if (!ball.active || ball.returned) {
       return;
@@ -762,6 +807,7 @@ export function createGameController({
   return {
     activateSpeedUp,
     clearLowestBlockRows,
+    clearBlocksInArea,
     consumeHeartContinue,
     continueFromGameOver,
     exportSnapshot,

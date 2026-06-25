@@ -33,7 +33,7 @@ test("current user is summarized separately when outside top 10", () => {
 });
 
 test("current user can appear inside top 10", () => {
-  const board = createLeaderboard({ currentBestLevel: 1090, boardType: "total" });
+  const board = createLeaderboard({ currentBestLevel: 1150, boardType: "total" });
 
   assert.equal(board.topRows.some((row) => row.isCurrentUser), true);
   assert.equal(board.currentUser.rankLabel, "8");
