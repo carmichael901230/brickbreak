@@ -83,6 +83,13 @@ const texts = {
   freezeLimitDescription: "每局最多使用 3 次冰冻，下一局可重新使用。",
   freezeShareFailed: "分享暂时不可用，请稍后再试",
   freezeShareRewarded: "已获得 1 个冰冻道具",
+  ragePromptTitle: "狂暴",
+  rageDescription: "下一次发射的球数量翻倍，本回合结束后恢复正常。",
+  rageConfirm: "确认使用",
+  rageShareConfirm: "分享获取",
+  rageLimitDescription: "每局最多使用 3 次狂暴，下一局可重新使用。",
+  rageShareFailed: "分享暂时不可用，请稍后再试",
+  rageShareRewarded: "已获得 1 个狂暴道具",
   claim: "领取",
   newRecord: "新纪录",
   brokePreviousRecord: (level) => `你已突破之前的第 ${level} 关纪录`,
@@ -108,6 +115,8 @@ const BOMB_ANIMATION_DURATION = 700;
 const BOMB_DRAG_THRESHOLD = 8;
 const FREEZE_MAX_USES_PER_RUN = 3;
 const FREEZE_ANIMATION_DURATION = 900;
+const RAGE_MAX_USES_PER_RUN = 3;
+const RAGE_ANIMATION_DURATION = 850;
 const REWARDED_AD_UNIT_ID = "adunit-fce0dbb1a75742d4";
 const ITEM_TRAY_HEIGHT = 86;
 const ITEM_TRAY_GAP = 8;
@@ -369,6 +378,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   const clearLinesIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/clear-lines.png");
   const bombItemIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/bomb-item.png");
   const freezeItemIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/freeze-item.png");
+  const rageItemIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/rage-item.png");
   const adVideoIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/ad-video.png");
   const shareIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/share.png");
   const leaderboardAvatarAssets = Object.fromEntries(
@@ -535,6 +545,13 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let freezeToolDemoStartedAt = 0;
   let freezeAnimation = null;
   let pendingFreezeShare = false;
+  let rageFreeItemAvailable = storage.loadRageFreeUsed() !== true;
+  let rageShareItemsThisRun = 0;
+  let rageUsesThisRun = 0;
+  let rageToolMessage = "";
+  let rageToolDemoStartedAt = 0;
+  let rageAnimation = null;
+  let pendingRageShare = false;
   let rewardedAdPurpose = null;
   let reviveAdLoading = false;
   let doubleCoinMessage = "";
@@ -686,6 +703,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       freezeFreeItemAvailable,
       freezeShareItemsThisRun,
       freezeUsesThisRun,
+      rageFreeItemAvailable,
+      rageShareItemsThisRun,
+      rageUsesThisRun,
+      pendingRageShare,
       snapshot
     };
   }
@@ -739,10 +760,11 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   function itemTrayRect(rect) {
     const top = rect.y + rect.height + ITEM_TRAY_GAP;
     const bottom = screenHeight - rect.bottomInset;
+    const horizontalInset = clamp(rect.horizontalPadding * 0.65, 8, 12);
     return {
-      x: rect.x,
+      x: horizontalInset,
       y: top,
-      width: rect.width,
+      width: screenWidth - horizontalInset * 2,
       height: Math.max(0, bottom - top)
     };
   }
@@ -753,23 +775,41 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
   function itemToolButtonSize(rect) {
     const tray = itemTrayRect(rect);
+    const gap = itemToolButtonGap(rect);
+    const sidePadding = itemToolTraySidePadding(rect);
     return clamp(
-      Math.min(tray.height * 0.72, rect.width * 0.24),
-      72,
-      108
+      Math.min(tray.height * 0.9, (tray.width - sidePadding * 2 - gap * 3) / 4),
+      58,
+      96
     );
   }
 
-  function clearToolButtonRect(rect) {
+  function itemToolButtonGap(rect) {
+    const tray = itemTrayRect(rect);
+    return clamp(tray.width * 0.011, 4, 6);
+  }
+
+  function itemToolTraySidePadding(rect) {
+    const tray = itemTrayRect(rect);
+    return clamp(tray.width * 0.02, 7, 10);
+  }
+
+  function itemToolButtonRect(rect, index, id) {
     const tray = itemTrayRect(rect);
     const size = itemToolButtonSize(rect);
+    const gap = itemToolButtonGap(rect);
+    const totalWidth = size * 4 + gap * 3;
     return {
-      id: "clear-tool",
-      x: tray.x + tray.width - 12 - size,
+      id,
+      x: tray.x + (tray.width - totalWidth) / 2 + index * (size + gap),
       y: tray.y + Math.max(0, (tray.height - size) / 2),
       width: size,
       height: size
     };
+  }
+
+  function clearToolButtonRect(rect) {
+    return itemToolButtonRect(rect, 3, "clear-tool");
   }
 
   function bombToolInventoryCount() {
@@ -777,15 +817,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   function bombToolButtonRect(rect) {
-    const tray = itemTrayRect(rect);
-    const size = itemToolButtonSize(rect);
-    return {
-      id: "bomb-tool",
-      x: tray.x + 12,
-      y: tray.y + Math.max(0, (tray.height - size) / 2),
-      width: size,
-      height: size
-    };
+    return itemToolButtonRect(rect, 0, "bomb-tool");
   }
 
   function freezeToolInventoryCount() {
@@ -793,22 +825,23 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   function freezeToolButtonRect(rect) {
-    const tray = itemTrayRect(rect);
-    const size = itemToolButtonSize(rect);
-    return {
-      id: "freeze-tool",
-      x: tray.x + (tray.width - size) / 2,
-      y: tray.y + Math.max(0, (tray.height - size) / 2),
-      width: size,
-      height: size
-    };
+    return itemToolButtonRect(rect, 1, "freeze-tool");
+  }
+
+  function rageToolInventoryCount() {
+    return (rageFreeItemAvailable ? 1 : 0) + rageShareItemsThisRun;
+  }
+
+  function rageToolButtonRect(rect) {
+    return itemToolButtonRect(rect, 2, "rage-tool");
   }
 
   function itemsCanActivate() {
     return game.getState().state === "aiming" &&
       !clearToolAnimation &&
       !bombAnimation &&
-      !freezeAnimation;
+      !freezeAnimation &&
+      !rageAnimation;
   }
 
   function bombToolPanelMode() {
@@ -1185,6 +1218,106 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     persistProgress(true);
   }
 
+  function rageToolPanelMode() {
+    if (rageUsesThisRun >= RAGE_MAX_USES_PER_RUN) {
+      return "limit";
+    }
+    return rageToolInventoryCount() > 0 ? "use" : "share";
+  }
+
+  function openRageToolPanel() {
+    const state = game.getState();
+    if (!itemsCanActivate() || state.rageArmed || state.rageVolleyActive) {
+      return;
+    }
+    bombPlacementArmed = false;
+    bombDrag = null;
+    rageToolMessage = "";
+    rageToolDemoStartedAt = Date.now();
+    overlay = "rage-tool";
+  }
+
+  function consumeRageToolItem() {
+    if (rageFreeItemAvailable) {
+      rageFreeItemAvailable = false;
+      storage.saveRageFreeUsed(true);
+      return true;
+    }
+    if (rageShareItemsThisRun > 0) {
+      rageShareItemsThisRun -= 1;
+      return true;
+    }
+    return false;
+  }
+
+  function requestRageToolShare() {
+    if (
+      pendingRageShare ||
+      rageUsesThisRun + rageToolInventoryCount() >= RAGE_MAX_USES_PER_RUN ||
+      game.getState().state !== "aiming"
+    ) {
+      return;
+    }
+
+    rageToolMessage = "";
+    pendingRageShare = true;
+    persistProgress(true);
+    try {
+      if (typeof wxApi.shareAppMessage !== "function") {
+        throw new Error("share unavailable");
+      }
+      wxApi.shareAppMessage(createSharePayload("rage-tool"));
+    } catch {
+      pendingRageShare = false;
+      rageToolMessage = texts.rageShareFailed;
+      persistProgress(true);
+    }
+  }
+
+  function completePendingRageShare() {
+    if (!pendingRageShare) {
+      return false;
+    }
+
+    pendingRageShare = false;
+    if (rageUsesThisRun + rageToolInventoryCount() >= RAGE_MAX_USES_PER_RUN) {
+      persistProgress(true);
+      return false;
+    }
+    rageShareItemsThisRun += 1;
+    rageToolMessage = texts.rageShareRewarded;
+    persistProgress(true);
+    return true;
+  }
+
+  function confirmRageToolUse() {
+    if (!itemsCanActivate()) {
+      overlay = null;
+      return;
+    }
+    const mode = rageToolPanelMode();
+    if (mode === "share") {
+      requestRageToolShare();
+      return;
+    }
+    if (mode !== "use" || !game.activateRage()) {
+      return;
+    }
+    if (!consumeRageToolItem()) {
+      game.getState().rageArmed = false;
+      return;
+    }
+
+    rageUsesThisRun = Math.min(RAGE_MAX_USES_PER_RUN, rageUsesThisRun + 1);
+    rageToolMessage = "";
+    rageAnimation = {
+      startedAt: Date.now(),
+      duration: RAGE_ANIMATION_DURATION
+    };
+    overlay = null;
+    persistProgress(true);
+  }
+
   function requestClearToolAd() {
     if (clearAdLoading || clearUsesThisRun >= CLEAR_TOOL_MAX_USES_PER_RUN) {
       return;
@@ -1444,6 +1577,13 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       Math.floor(Number(progress.freezeShareItemsThisRun) || 0)
     );
     freezeUsesThisRun = Math.max(0, Math.floor(Number(progress.freezeUsesThisRun) || 0));
+    rageFreeItemAvailable = progress.rageFreeItemAvailable !== false &&
+      storage.loadRageFreeUsed() !== true;
+    rageShareItemsThisRun = Math.max(
+      0,
+      Math.floor(Number(progress.rageShareItemsThisRun) || 0)
+    );
+    rageUsesThisRun = Math.max(0, Math.floor(Number(progress.rageUsesThisRun) || 0));
     clearToolMessage = "";
     clearToolAnimation = null;
     clearAdLoading = false;
@@ -1455,6 +1595,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     freezeToolMessage = "";
     freezeAnimation = null;
     pendingFreezeShare = false;
+    rageToolMessage = "";
+    rageAnimation = null;
+    pendingRageShare = progress.pendingRageShare === true;
     rewardedAdPurpose = null;
     reviveAdLoading = false;
     doubleCoinMessage = "";
@@ -1515,6 +1658,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     freezeToolMessage = "";
     freezeAnimation = null;
     pendingFreezeShare = false;
+    rageFreeItemAvailable = storage.loadRageFreeUsed() !== true;
+    rageShareItemsThisRun = 0;
+    rageUsesThisRun = 0;
+    rageToolMessage = "";
+    rageAnimation = null;
+    pendingRageShare = false;
     game.restart();
     runCoinsEarned = 0;
     hasStartedRun = true;
@@ -1990,6 +2139,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       if (!game.getState().freezeActive) {
         buttons.push(freezeToolButtonRect(rect));
       }
+      if (!game.getState().rageArmed && !game.getState().rageVolleyActive) {
+        buttons.push(rageToolButtonRect(rect));
+      }
       buttons.push(clearToolButtonRect(rect));
     }
 
@@ -2095,6 +2247,26 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       }
     }
 
+    if (overlay === "rage-tool") {
+      buttons.push({
+        id: "rage-tool-close",
+        x: clearToolPanel.x + clearToolPanel.width - 44,
+        y: clearToolPanel.y + 20,
+        width: 24,
+        height: 24
+      });
+
+      if (rageToolPanelMode() !== "limit") {
+        buttons.push({
+          id: "rage-tool-confirm",
+          x: clearToolPanel.x + 32,
+          y: clearToolPanel.y + clearToolPanel.height - 76,
+          width: clearToolPanel.width - 64,
+          height: 52
+        });
+      }
+    }
+
     if (overlay === "gameover") {
       buttons.push({
         id: "gameover-close",
@@ -2141,7 +2313,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       (coinDoubleAnimation && screen === "game" && overlay === "gameover") ||
       bombAnimation ||
       clearToolAnimation ||
-      freezeAnimation
+      freezeAnimation ||
+      rageAnimation
     ) {
       return;
     }
@@ -2259,6 +2432,16 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         break;
       case "freeze-tool-confirm":
         confirmFreezeToolUse();
+        break;
+      case "rage-tool":
+        openRageToolPanel();
+        break;
+      case "rage-tool-close":
+        rageToolMessage = "";
+        overlay = null;
+        break;
+      case "rage-tool-confirm":
+        confirmRageToolUse();
         break;
       case "resume":
         overlay = null;
@@ -3637,8 +3820,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   function drawItemCountBadge(context, button, count, accentColor) {
-    const badgeWidth = clamp(button.width * 0.48, 40, 52);
-    const badgeHeight = clamp(button.height * 0.27, 24, 30);
+    const badgeWidth = clamp(button.width * 0.48, 34, 52);
+    const badgeHeight = clamp(button.height * 0.27, 22, 30);
     const badgeX = button.x + button.width - badgeWidth * 0.84;
     const badgeY = button.y + button.height - badgeHeight * 0.86;
 
@@ -3769,6 +3952,46 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
     context.globalAlpha = 1;
     drawItemCountBadge(context, button, count, "#67e8f9");
+    context.restore();
+  }
+
+  function drawRageToolButton(context, rect) {
+    if (overlay !== null || game.getState().state === "gameover") {
+      return;
+    }
+    const button = rageToolButtonRect(rect);
+    const state = game.getState();
+    const count = rageToolInventoryCount();
+    const disabled = !itemsCanActivate() ||
+      state.rageArmed ||
+      state.rageVolleyActive ||
+      rageUsesThisRun >= RAGE_MAX_USES_PER_RUN;
+    const iconSize = button.width * 0.94;
+    const iconX = button.x + (button.width - iconSize) / 2;
+    const iconY = button.y + (button.height - iconSize) / 2;
+    context.save();
+    context.globalAlpha = disabled ? 0.45 : 1;
+    if (rageItemIconAsset.loaded && rageItemIconAsset.image) {
+      context.drawImage(rageItemIconAsset.image, iconX, iconY, iconSize, iconSize);
+    } else {
+      const gradient = context.createRadialGradient(
+        button.x + button.width / 2,
+        button.y + button.height / 2,
+        2,
+        button.x + button.width / 2,
+        button.y + button.height / 2,
+        iconSize * 0.42
+      );
+      gradient.addColorStop(0, "#fff3a3");
+      gradient.addColorStop(0.45, "#ff4b20");
+      gradient.addColorStop(1, "#6b0b0b");
+      context.fillStyle = gradient;
+      context.beginPath();
+      context.arc(button.x + button.width / 2, button.y + button.height / 2, iconSize * 0.38, 0, Math.PI * 2);
+      context.fill();
+    }
+    context.globalAlpha = 1;
+    drawItemCountBadge(context, button, count, "#ff4b20");
     context.restore();
   }
 
@@ -4209,6 +4432,166 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       return;
     }
     drawButton(context, confirmButton, texts.freezeConfirm, true);
+  }
+
+  function drawRageToolPanel(context, panel) {
+    const mode = rageToolPanelMode();
+    const confirmButton = currentButtons().find((button) => button.id === "rage-tool-confirm");
+    const centerX = panel.x + panel.width / 2;
+    drawRageToolDemo(context, panel);
+
+    context.fillStyle = "rgba(255,255,255,0.82)";
+    context.font = "16px sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "alphabetic";
+    const lines = mode === "limit"
+      ? ["每局最多使用 3 次狂暴，", "下一局可重新使用。"]
+      : ["下一次发射的球数量翻倍。"];
+    for (let index = 0; index < lines.length; index += 1) {
+      context.fillText(lines[index], centerX, panel.y + 218 + index * 24);
+    }
+
+    if (rageToolMessage) {
+      context.fillStyle = rageToolMessage === texts.rageShareFailed ? "#fca5a5" : "#ff8a65";
+      context.font = "700 14px sans-serif";
+      context.fillText(
+        rageToolMessage,
+        centerX,
+        confirmButton ? confirmButton.y - 16 : panel.y + panel.height - 42
+      );
+    }
+
+    if (!confirmButton) {
+      return;
+    }
+    if (mode === "share") {
+      roundedRect(
+        context,
+        confirmButton.x,
+        confirmButton.y,
+        confirmButton.width,
+        confirmButton.height,
+        24
+      );
+      const buttonGradient = context.createLinearGradient(
+        confirmButton.x,
+        confirmButton.y,
+        confirmButton.x + confirmButton.width,
+        confirmButton.y
+      );
+      buttonGradient.addColorStop(0, "#ef2d1f");
+      buttonGradient.addColorStop(1, "#ff8a1f");
+      context.fillStyle = buttonGradient;
+      context.fill();
+      const label = texts.rageShareConfirm;
+      const iconSize = 24;
+      const gap = 8;
+      context.font = "700 20px sans-serif";
+      const textWidth = context.measureText(label).width;
+      const contentX = confirmButton.x + (confirmButton.width - iconSize - gap - textWidth) / 2;
+      const centerY = confirmButton.y + confirmButton.height / 2;
+      if (shareIconAsset.loaded && shareIconAsset.image) {
+        context.drawImage(shareIconAsset.image, contentX, centerY - iconSize / 2, iconSize, iconSize);
+      }
+      context.fillStyle = "#ffffff";
+      context.textAlign = "left";
+      context.textBaseline = "middle";
+      context.fillText(label, contentX + iconSize + gap, centerY + 1);
+      return;
+    }
+    drawButton(context, confirmButton, texts.rageConfirm, true);
+  }
+
+  function drawRageToolDemo(context, panel) {
+    const demo = {
+      x: panel.x + 24,
+      y: panel.y + 72,
+      width: panel.width - 48,
+      height: 126
+    };
+    const elapsed = Math.max(0, Date.now() - rageToolDemoStartedAt) % 3600;
+    const charge = easeOutCubic(clamp((elapsed - 500) / 650, 0, 1));
+    const launch = clamp((elapsed - 1350) / 1300, 0, 1);
+    const fade = 1 - clamp((elapsed - 2850) / 500, 0, 1);
+    const centerX = demo.x + demo.width / 2;
+    const launchY = demo.y + demo.height - 24;
+
+    context.save();
+    roundedRect(context, demo.x, demo.y, demo.width, demo.height, 10);
+    context.fillStyle = "#180d16";
+    context.fill();
+    context.beginPath();
+    roundedRect(context, demo.x, demo.y, demo.width, demo.height, 10);
+    context.clip();
+
+    const aura = context.createRadialGradient(centerX, launchY, 4, centerX, launchY, 54 + charge * 24);
+    aura.addColorStop(0, `rgba(255,244,170,${0.28 + charge * 0.4})`);
+    aura.addColorStop(0.42, `rgba(255,57,24,${0.18 + charge * 0.38})`);
+    aura.addColorStop(1, "rgba(100,0,0,0)");
+    context.fillStyle = aura;
+    context.beginPath();
+    context.arc(centerX, launchY, 64 + charge * 22, 0, Math.PI * 2);
+    context.fill();
+
+    if (rageItemIconAsset.loaded && rageItemIconAsset.image && charge < 0.98) {
+      const iconSize = 42 + charge * 18;
+      context.globalAlpha = Math.max(0, 1 - charge * 0.8);
+      context.drawImage(
+        rageItemIconAsset.image,
+        centerX - iconSize / 2,
+        launchY - iconSize / 2,
+        iconSize,
+        iconSize
+      );
+      context.globalAlpha = 1;
+    }
+
+    const ballRadius = 8;
+    const paths = [-34, -22, -10, 10, 22, 34];
+    for (let index = 0; index < paths.length; index += 1) {
+      const doubled = index >= 3;
+      const localLaunch = doubled
+        ? clamp((launch - 0.16) / 0.84, 0, 1)
+        : launch;
+      const x = centerX + paths[index] * localLaunch;
+      const y = launchY - localLaunch * (82 + (index % 3) * 6);
+      context.globalAlpha = fade * (doubled ? charge : 1);
+      context.beginPath();
+      context.moveTo(x, y + ballRadius * 2.8);
+      context.lineTo(x - 4, y + ballRadius * 0.4);
+      context.lineTo(x + 4, y + ballRadius * 0.4);
+      context.closePath();
+      context.fillStyle = doubled ? "#ef2d1f" : "#ff8a1f";
+      context.fill();
+      context.beginPath();
+      context.arc(x, y, ballRadius, 0, Math.PI * 2);
+      context.fillStyle = "#fff6e8";
+      context.fill();
+      context.strokeStyle = doubled ? "#ff3020" : "#ffb347";
+      context.lineWidth = 2;
+      context.stroke();
+    }
+    context.globalAlpha = 1;
+
+    context.font = "900 22px sans-serif";
+    context.textAlign = "left";
+    context.textBaseline = "middle";
+    const label = charge > 0.72 ? "×6" : "×3";
+    const labelX = centerX + 28;
+    const labelY = launchY - 2;
+    if (charge > 0.72) {
+      context.shadowColor = "#ff2d20";
+      context.shadowBlur = 10;
+      const gradient = context.createLinearGradient(labelX, labelY + 10, labelX, labelY - 14);
+      gradient.addColorStop(0, "#ff2d20");
+      gradient.addColorStop(0.55, "#ff8a1f");
+      gradient.addColorStop(1, "#fff3a3");
+      context.fillStyle = gradient;
+    } else {
+      context.fillStyle = "#d8f1ff";
+    }
+    context.fillText(label, labelX, labelY);
+    context.restore();
   }
 
   function drawFreezeToolDemo(context, panel) {
@@ -4674,6 +5057,68 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     context.restore();
   }
 
+  function drawRageAnimation(context, rect) {
+    if (!rageAnimation) {
+      return;
+    }
+
+    const elapsed = Date.now() - rageAnimation.startedAt;
+    const progress = clamp(elapsed / rageAnimation.duration, 0, 1);
+    if (progress >= 1) {
+      rageAnimation = null;
+      return;
+    }
+
+    const state = game.getState();
+    const centerX = rect.x + state.launcherX * (rect.width / GAME_CONFIG.width);
+    const centerY = rect.y + state.arena.launcherY * (rect.height / GAME_CONFIG.height);
+    const burst = Math.sin(progress * Math.PI);
+    const fade = 1 - clamp((progress - 0.62) / 0.38, 0, 1);
+    context.save();
+    context.beginPath();
+    context.rect(rect.x, rect.y, rect.width, rect.height);
+    context.clip();
+    context.globalCompositeOperation = "screen";
+
+    const aura = context.createRadialGradient(centerX, centerY, 4, centerX, centerY, 36 + burst * 72);
+    aura.addColorStop(0, `rgba(255,248,190,${0.8 * fade})`);
+    aura.addColorStop(0.38, `rgba(255,70,20,${0.62 * fade})`);
+    aura.addColorStop(1, "rgba(160,0,0,0)");
+    context.fillStyle = aura;
+    context.beginPath();
+    context.arc(centerX, centerY, 38 + burst * 72, 0, Math.PI * 2);
+    context.fill();
+
+    if (rageItemIconAsset.loaded && rageItemIconAsset.image) {
+      const iconSize = 46 + burst * 48;
+      context.globalAlpha = fade * (1 - progress * 0.45);
+      context.drawImage(
+        rageItemIconAsset.image,
+        centerX - iconSize / 2,
+        centerY - iconSize / 2,
+        iconSize,
+        iconSize
+      );
+    }
+
+    context.globalAlpha = fade;
+    for (let index = 0; index < 16; index += 1) {
+      const angle = index * Math.PI * 2 / 16 - Math.PI / 2;
+      const distance = 18 + burst * (48 + (index % 4) * 8);
+      context.fillStyle = index % 2 === 0 ? "#ff2d20" : "#ffd166";
+      context.beginPath();
+      context.arc(
+        centerX + Math.cos(angle) * distance,
+        centerY + Math.sin(angle) * distance,
+        2 + (index % 3),
+        0,
+        Math.PI * 2
+      );
+      context.fill();
+    }
+    context.restore();
+  }
+
   function drawColoredTitle(context, x, y) {
     const colors = ["#ef4444", "#facc15", "#3b82f6", "#22c55e"];
     const characters = Array.from(texts.title);
@@ -4961,11 +5406,13 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       drawItemTray(context, rect);
       drawBombToolButton(context, rect);
       drawFreezeToolButton(context, rect);
+      drawRageToolButton(context, rect);
       drawClearToolButton(context, rect);
       drawBombPlacement(context, rect);
       drawClearToolAnimation(context, rect);
       drawBombAnimation(context, rect);
       drawFreezeAnimation(context, rect);
+      drawRageAnimation(context, rect);
 
       if (shouldShowTutorial(state)) {
         drawTutorialHint(context, rect);
@@ -5010,6 +5457,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
                 ? clearToolPanelRect(rect)
                 : overlay === "freeze-tool"
                   ? clearToolPanelRect(rect)
+                  : overlay === "rage-tool"
+                    ? clearToolPanelRect(rect)
       : {
           x: rect.x + panelSideInset,
           y: rect.y + rect.height * panelYScale,
@@ -5047,6 +5496,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
                       ? texts.bombPromptTitle
                       : overlay === "freeze-tool"
                         ? texts.freezePromptTitle
+                        : overlay === "rage-tool"
+                          ? texts.ragePromptTitle
                     : texts.runOver;
     context.fillText(
       overlayTitle,
@@ -5060,7 +5511,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       overlay === "leaderboard" ||
       overlay === "clear-tool" ||
       overlay === "bomb-tool" ||
-      overlay === "freeze-tool"
+      overlay === "freeze-tool" ||
+      overlay === "rage-tool"
     ) {
       drawCloseButton(context, currentButtons().find((button) =>
         button.id === (overlay === "gameover"
@@ -5073,6 +5525,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
                 ? "bomb-tool-close"
                 : overlay === "freeze-tool"
                   ? "freeze-tool-close"
+                  : overlay === "rage-tool"
+                    ? "rage-tool-close"
               : "confirm-new-close")
       ));
     }
@@ -5094,6 +5548,11 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     if (overlay === "freeze-tool") {
       drawFreezeToolPanel(context, panel);
+      return;
+    }
+
+    if (overlay === "rage-tool") {
+      drawRageToolPanel(context, panel);
       return;
     }
 
@@ -5314,7 +5773,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   function onTouchStart(event) {
-    if (bombAnimation || clearToolAnimation || freezeAnimation) {
+    if (bombAnimation || clearToolAnimation || freezeAnimation || rageAnimation) {
       return;
     }
     const point = getTouchPoint(event);
@@ -5507,6 +5966,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   });
   wxApi.onShow?.(() => {
     if (completePendingDoubleCoinShare()) {
+      return;
+    }
+    if (completePendingRageShare()) {
       return;
     }
     if (completePendingFreezeShare()) {

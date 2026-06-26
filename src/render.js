@@ -663,7 +663,62 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
     const timeNow = globalThis.performance?.now?.() ?? Date.now();
     const pulse = 0.5 + Math.sin(timeNow * 0.005) * 0.12;
     const launcherRadius = config.ballRadius;
-    const queuedBalls = Math.max(0, state.ballsOwned - state.ballsLaunched);
+    const rageVisible = state.rageArmed || state.rageVolleyActive;
+    const volleySize = state.rageArmed
+      ? state.ballsOwned * 2
+      : state.rageVolleyActive
+        ? state.balls.length
+        : state.ballsOwned;
+    const queuedBalls = Math.max(0, volleySize - state.ballsLaunched);
+    if (rageVisible || state.rageActivationEffect) {
+      const effectProgress = state.rageActivationEffect
+        ? 1 - state.rageActivationEffect.life / state.rageActivationEffect.duration
+        : 1;
+      const burst = state.rageActivationEffect
+        ? Math.sin(Math.min(1, effectProgress) * Math.PI)
+        : 0;
+      const flamePulse = 0.72 + Math.sin(timeNow * 0.018) * 0.18;
+      context.save();
+      context.globalCompositeOperation = "screen";
+      const aura = context.createRadialGradient(
+        state.launcherX,
+        state.arena.launcherY,
+        launcherRadius * 0.2,
+        state.launcherX,
+        state.arena.launcherY,
+        launcherRadius * (2.3 + burst)
+      );
+      aura.addColorStop(0, `rgba(255,245,170,${0.45 + burst * 0.25})`);
+      aura.addColorStop(0.42, `rgba(255,70,20,${0.5 * flamePulse})`);
+      aura.addColorStop(1, "rgba(185,0,0,0)");
+      context.fillStyle = aura;
+      context.beginPath();
+      context.arc(
+        state.launcherX,
+        state.arena.launcherY,
+        launcherRadius * (2.3 + burst),
+        0,
+        Math.PI * 2
+      );
+      context.fill();
+
+      const sparkCount = state.rageActivationEffect ? 12 : 6;
+      for (let index = 0; index < sparkCount; index += 1) {
+        const angle = index * (Math.PI * 2 / sparkCount) + timeNow * 0.002;
+        const distance = launcherRadius * (1.35 + ((index * 37) % 10) / 10 + burst);
+        context.fillStyle = index % 2 === 0 ? "#ff3b1f" : "#ffd166";
+        context.beginPath();
+        context.arc(
+          state.launcherX + Math.cos(angle) * distance,
+          state.arena.launcherY + Math.sin(angle) * distance * 0.7,
+          1.5 + (index % 3) + burst * 2,
+          0,
+          Math.PI * 2
+        );
+        context.fill();
+      }
+      context.restore();
+    }
     context.beginPath();
     context.arc(state.launcherX, state.arena.launcherY, launcherRadius + 3 + pulse * 2, 0, Math.PI * 2);
     context.fillStyle = "rgba(255, 179, 71, 0.18)";
@@ -677,7 +732,26 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
     context.font = "700 28px 'Segoe UI'";
     context.textAlign = "left";
     context.textBaseline = "middle";
-    context.fillText(`x${queuedBalls}`, state.launcherX + launcherRadius + 18, state.arena.launcherY + 1);
+    const countX = state.launcherX + launcherRadius + 18;
+    const countY = state.arena.launcherY + 1;
+    if (rageVisible) {
+      context.save();
+      context.shadowColor = "#ff2d20";
+      context.shadowBlur = 12;
+      context.strokeStyle = "rgba(120,0,0,0.95)";
+      context.lineWidth = 5;
+      context.strokeText(`x${queuedBalls}`, countX, countY);
+      const fireGradient = context.createLinearGradient(countX, countY + 12, countX, countY - 18);
+      fireGradient.addColorStop(0, "#ff2d20");
+      fireGradient.addColorStop(0.55, "#ff8a1f");
+      fireGradient.addColorStop(1, "#fff3a3");
+      context.fillStyle = fireGradient;
+      context.fillText(`x${queuedBalls}`, countX, countY);
+      context.restore();
+      return;
+    }
+    context.fillStyle = "#d8f1ff";
+    context.fillText(`x${queuedBalls}`, countX, countY);
   }
 
   function drawBanner(state) {

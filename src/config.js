@@ -217,5 +217,6 @@ export const STORAGE_KEYS = {
   dailyCheckIn: "arc-cascade-daily-check-in",
   clearFreeUsed: "arc-cascade-clear-free-used",
   bombFreeUsed: "arc-cascade-bomb-free-used",
-  freezeFreeUsed: "arc-cascade-freeze-free-used"
+  freezeFreeUsed: "arc-cascade-freeze-free-used",
+  rageFreeUsed: "arc-cascade-rage-free-used"
 };

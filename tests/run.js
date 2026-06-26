@@ -220,6 +220,14 @@ test("storage adapter persists clear free item usage", () => {
   assert.equal(adapter.loadClearFreeUsed(), true);
 });
 
+test("storage adapter persists rage free item usage", () => {
+  const storage = createMemoryStorage();
+  const adapter = createStorageAdapter(storage);
+  assert.equal(adapter.loadRageFreeUsed(), false);
+  adapter.saveRageFreeUsed(true);
+  assert.equal(adapter.loadRageFreeUsed(), true);
+});
+
 test("storage adapter persists and loads daily check-in state", () => {
   const storage = createMemoryStorage();
   const adapter = createStorageAdapter(storage);
@@ -432,6 +440,98 @@ test("freeze can only be activated while aiming and survives snapshots", () => {
   });
   assert.equal(restored.importSnapshot(snapshot), true);
   assert.equal(restored.getState().freezeActive, true);
+});
+
+test("rage doubles only the next volley and removes temporary balls afterward", () => {
+  const game = createGameController({
+    boardGenerator: createRoundSequence([
+      { blocks: [], pickups: [], coins: [] },
+      { blocks: [], pickups: [], coins: [] }
+    ]),
+    audioBus: createSilentAudioBus()
+  });
+  const state = game.getState();
+  const baseBall = state.balls[0];
+  state.ballsOwned = 3;
+  state.balls = Array.from({ length: 3 }, () => ({
+    ...baseBall,
+    active: false,
+    returned: false,
+    x: state.launcherX,
+    y: state.arena.launcherY
+  }));
+
+  assert.equal(game.activateRage(), true);
+  assert.equal(game.activateRage(), false);
+  assert.equal(state.rageArmed, true);
+
+  game.startAim({ x: 360, y: 500 });
+  game.updateAim({ x: 200, y: 3900 });
+  game.releaseAim({ x: 200, y: 3900 });
+
+  assert.equal(state.rageArmed, false);
+  assert.equal(state.rageVolleyActive, true);
+  assert.equal(state.ballsOwned, 3);
+  assert.equal(state.balls.length, 6);
+
+  state.pickups = [{ id: "rage-pickup", row: 0, column: 0, collected: true }];
+  state.returnedBalls = state.balls.length;
+  state.state = "resolving";
+  game.update(0.016);
+
+  assert.equal(state.rageVolleyActive, false);
+  assert.equal(state.ballsOwned, 4);
+  assert.equal(state.balls.length, 4);
+  assert.equal(state.state, "aiming");
+});
+
+test("rage armed and doubled volley state survive snapshots without permanent inflation", () => {
+  const game = createGameController({
+    boardGenerator: createRoundSequence([{ blocks: [], pickups: [], coins: [] }]),
+    audioBus: createSilentAudioBus()
+  });
+  assert.equal(game.activateRage(), true);
+
+  const armedSnapshot = game.exportSnapshot();
+  const armedRestore = createGameController({
+    boardGenerator: createRoundSequence([{ blocks: [], pickups: [], coins: [] }]),
+    audioBus: createSilentAudioBus()
+  });
+  assert.equal(armedRestore.importSnapshot(armedSnapshot), true);
+  assert.equal(armedRestore.getState().rageArmed, true);
+  assert.equal(armedRestore.getState().rageVolleyActive, false);
+
+  const state = game.getState();
+  const baseBall = state.balls[0];
+  state.ballsOwned = 3;
+  state.balls = Array.from({ length: 3 }, () => ({ ...baseBall }));
+  game.startAim({ x: 360, y: 500 });
+  game.updateAim({ x: 200, y: 3900 });
+  game.releaseAim({ x: 200, y: 3900 });
+  game.update(0.016);
+
+  const volleySnapshot = game.exportSnapshot();
+  const volleyRestore = createGameController({
+    boardGenerator: createRoundSequence([{ blocks: [], pickups: [], coins: [] }]),
+    audioBus: createSilentAudioBus()
+  });
+  assert.equal(volleyRestore.importSnapshot(volleySnapshot), true);
+  assert.equal(volleyRestore.getState().rageVolleyActive, true);
+  assert.equal(volleyRestore.getState().ballsOwned, 3);
+  assert.equal(volleyRestore.getState().balls.length, 6);
+});
+
+test("rage cannot activate outside aiming or while already active", () => {
+  const game = createGameController({
+    boardGenerator: createRoundSequence([{ blocks: [], pickups: [], coins: [] }]),
+    audioBus: createSilentAudioBus()
+  });
+  const state = game.getState();
+  state.state = "launching";
+  assert.equal(game.activateRage(), false);
+  state.state = "aiming";
+  state.rageVolleyActive = true;
+  assert.equal(game.activateRage(), false);
 });
 
 test("coins are collected on contact and emit a coin event", () => {

@@ -149,6 +149,9 @@ export function createInitialGameState(config = GAME_CONFIG, coins = 0, skins = 
     particles: [],
     heartConsumeEffect: null,
     freezeActive: false,
+    rageArmed: false,
+    rageVolleyActive: false,
+    rageActivationEffect: null,
     bannerTimer: config.effects.roundBannerTime,
     firstReturnX: null,
     gameOver: false
@@ -329,6 +332,8 @@ export function createGameController({
       balls: gameState.balls,
       particles: gameState.particles,
       freezeActive: gameState.freezeActive,
+      rageArmed: gameState.rageArmed,
+      rageVolleyActive: gameState.rageVolleyActive,
       bannerTimer: gameState.bannerTimer,
       firstReturnX: gameState.firstReturnX
     });
@@ -365,6 +370,8 @@ export function createGameController({
     nextState.speedUpAvailable = restoreBoolean(snapshot.speedUpAvailable, nextState.speedUpAvailable);
     nextState.speedUpUsed = restoreBoolean(snapshot.speedUpUsed, nextState.speedUpUsed);
     nextState.freezeActive = restoreBoolean(snapshot.freezeActive, false);
+    nextState.rageArmed = restoreBoolean(snapshot.rageArmed, false);
+    nextState.rageVolleyActive = restoreBoolean(snapshot.rageVolleyActive, false);
     nextState.state = snapshot.state;
     nextState.bannerTimer = restoreNumber(snapshot.bannerTimer, nextState.bannerTimer);
     nextState.firstReturnX = snapshot.firstReturnX === null ? null : restoreNumber(snapshot.firstReturnX, null);
@@ -386,7 +393,9 @@ export function createGameController({
       nextState.particles = cloneSerializable(snapshot.particles);
     }
 
-    nextState.ballsOwned = Math.max(nextState.ballsOwned, nextState.balls.length);
+    if (!nextState.rageVolleyActive) {
+      nextState.ballsOwned = Math.max(nextState.ballsOwned, nextState.balls.length);
+    }
     nextState.ballsLaunched = Math.min(nextState.ballsLaunched, nextState.balls.length);
     nextState.returnedBalls = Math.min(nextState.returnedBalls, nextState.balls.length);
     if (nextState.state === "aiming") {
@@ -437,6 +446,14 @@ export function createGameController({
     }
 
     gameState.launchDirection = clampLaunchDirection(vector, config);
+    if (gameState.rageArmed) {
+      const temporaryBalls = Array.from({ length: gameState.ballsOwned }, () =>
+        createBall(gameState.launcherX, gameState.arena.launcherY)
+      );
+      gameState.balls.push(...temporaryBalls);
+      gameState.rageArmed = false;
+      gameState.rageVolleyActive = true;
+    }
     gameState.state = "launching";
     gameState.launchCooldown = 0;
     gameState.volleyElapsed = 0;
@@ -610,6 +627,23 @@ export function createGameController({
     return true;
   }
 
+  function activateRage() {
+    if (
+      gameState.state !== "aiming" ||
+      gameState.rageArmed ||
+      gameState.rageVolleyActive
+    ) {
+      return false;
+    }
+
+    gameState.rageArmed = true;
+    gameState.rageActivationEffect = {
+      life: 0.8,
+      duration: 0.8
+    };
+    return true;
+  }
+
   function updateBall(ball, deltaTime) {
     if (!ball.active || ball.returned) {
       return;
@@ -702,7 +736,7 @@ export function createGameController({
       return;
     }
 
-    if (gameState.returnedBalls < gameState.ballsOwned) {
+    if (gameState.returnedBalls < gameState.balls.length) {
       return;
     }
 
@@ -710,6 +744,7 @@ export function createGameController({
     gameState.pickups = gameState.pickups.filter((pickup) => !pickup.collected);
     gameState.coinsOnBoard = gameState.coinsOnBoard.filter((coin) => !coin.collected);
     gameState.ballsOwned += collected;
+    gameState.rageVolleyActive = false;
     gameState.round += 1;
     gameState.launcherTargetX = gameState.firstReturnX ?? gameState.launcherX;
     syncLauncher();
@@ -748,6 +783,16 @@ export function createGameController({
       }
     }
 
+    if (gameState.rageActivationEffect) {
+      gameState.rageActivationEffect.life = Math.max(
+        0,
+        gameState.rageActivationEffect.life - cappedDelta
+      );
+      if (gameState.rageActivationEffect.life <= 0) {
+        gameState.rageActivationEffect = null;
+      }
+    }
+
     if (gameState.state === "launching" || gameState.state === "resolving") {
       gameState.volleyElapsed += cappedDelta;
       if (!gameState.speedUpAvailable && gameState.volleyElapsed >= gameState.nextSpeedUpAt) {
@@ -757,12 +802,12 @@ export function createGameController({
 
     if (gameState.state === "launching") {
       gameState.launchCooldown -= cappedDelta * gameState.speedMultiplier;
-      if (gameState.launchCooldown <= 0 && gameState.ballsLaunched < gameState.ballsOwned) {
+      if (gameState.launchCooldown <= 0 && gameState.ballsLaunched < gameState.balls.length) {
         emitBall();
         gameState.launchCooldown = config.launchInterval;
       }
 
-      if (gameState.ballsLaunched >= gameState.ballsOwned) {
+      if (gameState.ballsLaunched >= gameState.balls.length) {
         gameState.state = "resolving";
       }
     }
@@ -826,6 +871,7 @@ export function createGameController({
   return {
     activateSpeedUp,
     activateFreeze,
+    activateRage,
     clearLowestBlockRows,
     clearBlocksInArea,
     consumeHeartContinue,

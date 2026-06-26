@@ -218,6 +218,22 @@ export function createStorageAdapter(storage = globalThis.localStorage) {
       storage.setItem(STORAGE_KEYS.freezeFreeUsed, used ? "true" : "false");
     },
 
+    loadRageFreeUsed() {
+      if (!storage) {
+        return false;
+      }
+
+      return storage.getItem(STORAGE_KEYS.rageFreeUsed) === "true";
+    },
+
+    saveRageFreeUsed(used) {
+      if (!storage) {
+        return;
+      }
+
+      storage.setItem(STORAGE_KEYS.rageFreeUsed, used ? "true" : "false");
+    },
+
     clearGameProgress() {
       if (!storage) {
         return;
