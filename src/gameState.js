@@ -46,6 +46,10 @@ function getEntityPosition(arena, config, entity) {
   };
 }
 
+function entityCellKey(row, column) {
+  return `${row}:${column}`;
+}
+
 function isEntityAtFailLine(arena, config, entity) {
   const position = getEntityPosition(arena, config, entity);
   return position.y + arena.blockSize >= arena.failLineY;
@@ -660,6 +664,11 @@ export function createGameController({
       reflectBall(ball, gameState.arena, config);
 
       let collided = false;
+      const liveBlockCells = new Set(
+        gameState.blocks
+          .filter((block) => block.hp > 0)
+          .map((block) => entityCellKey(block.row, block.column))
+      );
       for (let index = 0; index < gameState.blocks.length; index += 1) {
         const block = gameState.blocks[index];
         if (block.hp <= 0) {
@@ -670,7 +679,13 @@ export function createGameController({
         const hit = resolveBallBlockCollision(
           ball,
           { x: position.x, y: position.y, size: gameState.arena.blockSize },
-          config
+          config,
+          {
+            left: liveBlockCells.has(entityCellKey(block.row, block.column - 1)),
+            right: liveBlockCells.has(entityCellKey(block.row, block.column + 1)),
+            top: liveBlockCells.has(entityCellKey(block.row - 1, block.column)),
+            bottom: liveBlockCells.has(entityCellKey(block.row + 1, block.column))
+          }
         );
 
         if (hit) {
