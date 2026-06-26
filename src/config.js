@@ -10,7 +10,7 @@ export const GAME_CONFIG = {
   visualBrickGap: 8,
   collisionPadding: 5,
   ballRadius: 14,
-  ballSpeed: 750,
+  ballSpeed: 800,
   aimSensitivity: 2.35,
   speedUpMultiplier: 2,
   speedUpDelay: 5,
