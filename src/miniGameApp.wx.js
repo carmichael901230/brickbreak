@@ -76,10 +76,17 @@ const texts = {
   bombAdLoading: "广告加载中",
   bombAdRewarded: "已获得 1 个炸弹",
   bombAdFailed: "广告暂时不可用，请稍后再试",
+  bombShareConfirm: "分享获取",
+  bombShareFailed: "分享暂时不可用，请稍后再试",
+  bombShareRewarded: "已获得 1 个炸弹",
   freezePromptTitle: "冰冻",
   freezeDescription: "冻结当前棋盘一回合。下一轮砖块不会下移，也不会生成新的一行。",
   freezeConfirm: "确认使用",
   freezeShareConfirm: "分享获取",
+  freezeAdConfirm: "看广告获取",
+  freezeAdLoading: "广告加载中",
+  freezeAdRewarded: "已获得 1 个冰冻道具",
+  freezeAdFailed: "广告暂时不可用，请稍后再试",
   freezeLimitDescription: "每局最多使用 3 次冰冻，下一局可重新使用。",
   freezeShareFailed: "分享暂时不可用，请稍后再试",
   freezeShareRewarded: "已获得 1 个冰冻道具",
@@ -87,6 +94,10 @@ const texts = {
   rageDescription: "下一次发射的球数量翻倍，本回合结束后恢复正常。",
   rageConfirm: "确认使用",
   rageShareConfirm: "分享获取",
+  rageAdConfirm: "看广告获取",
+  rageAdLoading: "广告加载中",
+  rageAdRewarded: "已获得 1 个狂暴道具",
+  rageAdFailed: "广告暂时不可用，请稍后再试",
   rageLimitDescription: "每局最多使用 3 次狂暴，下一局可重新使用。",
   rageShareFailed: "分享暂时不可用，请稍后再试",
   rageShareRewarded: "已获得 1 个狂暴道具",
@@ -530,26 +541,35 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let clearToolDemoStartedAt = 0;
   let clearAdLoading = false;
   let bombFreeItemAvailable = storage.loadBombFreeUsed() !== true;
+  let bombFreeUsedThisRun = false;
+  let bombShareItemsThisRun = 0;
   let bombAdItemsThisRun = 0;
   let bombUsesThisRun = 0;
   let bombToolMessage = "";
   let bombToolDemoStartedAt = 0;
   let bombAdLoading = false;
+  let pendingBombShare = false;
   let bombPlacementArmed = false;
   let bombDrag = null;
   let bombAnimation = null;
   let freezeFreeItemAvailable = storage.loadFreezeFreeUsed() !== true;
+  let freezeFreeUsedThisRun = false;
   let freezeShareItemsThisRun = 0;
+  let freezeAdItemsThisRun = 0;
   let freezeUsesThisRun = 0;
   let freezeToolMessage = "";
   let freezeToolDemoStartedAt = 0;
+  let freezeAdLoading = false;
   let freezeAnimation = null;
   let pendingFreezeShare = false;
   let rageFreeItemAvailable = storage.loadRageFreeUsed() !== true;
+  let rageFreeUsedThisRun = false;
   let rageShareItemsThisRun = 0;
+  let rageAdItemsThisRun = 0;
   let rageUsesThisRun = 0;
   let rageToolMessage = "";
   let rageToolDemoStartedAt = 0;
+  let rageAdLoading = false;
   let rageAnimation = null;
   let pendingRageShare = false;
   let rewardedAdPurpose = null;
@@ -698,14 +718,22 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       clearAdItemsThisRun,
       clearUsesThisRun,
       bombFreeItemAvailable,
+      bombFreeUsedThisRun,
+      bombShareItemsThisRun,
       bombAdItemsThisRun,
       bombUsesThisRun,
       freezeFreeItemAvailable,
+      freezeFreeUsedThisRun,
       freezeShareItemsThisRun,
+      freezeAdItemsThisRun,
       freezeUsesThisRun,
       rageFreeItemAvailable,
+      rageFreeUsedThisRun,
       rageShareItemsThisRun,
+      rageAdItemsThisRun,
       rageUsesThisRun,
+      pendingBombShare,
+      pendingFreezeShare,
       pendingRageShare,
       snapshot
     };
@@ -813,7 +841,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   function bombToolInventoryCount() {
-    return (bombFreeItemAvailable ? 1 : 0) + bombAdItemsThisRun;
+    return (bombFreeItemAvailable ? 1 : 0) + bombShareItemsThisRun + bombAdItemsThisRun;
   }
 
   function bombToolButtonRect(rect) {
@@ -821,7 +849,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   function freezeToolInventoryCount() {
-    return (freezeFreeItemAvailable ? 1 : 0) + freezeShareItemsThisRun;
+    return (freezeFreeItemAvailable ? 1 : 0) + freezeShareItemsThisRun + freezeAdItemsThisRun;
   }
 
   function freezeToolButtonRect(rect) {
@@ -829,7 +857,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   function rageToolInventoryCount() {
-    return (rageFreeItemAvailable ? 1 : 0) + rageShareItemsThisRun;
+    return (rageFreeItemAvailable ? 1 : 0) + rageShareItemsThisRun + rageAdItemsThisRun;
   }
 
   function rageToolButtonRect(rect) {
@@ -844,11 +872,26 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       !rageAnimation;
   }
 
-  function bombToolPanelMode() {
-    if (bombUsesThisRun >= BOMB_MAX_USES_PER_RUN) {
+  function limitedItemGrantMode(usesThisRun, inventoryCount, maxUses, freeUsedThisRun) {
+    if (usesThisRun >= maxUses) {
       return "limit";
     }
-    return bombToolInventoryCount() > 0 ? "use" : "ad";
+    if (inventoryCount > 0) {
+      return "use";
+    }
+    if (usesThisRun === 0 || (usesThisRun === 1 && freeUsedThisRun)) {
+      return "share";
+    }
+    return "ad";
+  }
+
+  function bombToolPanelMode() {
+    return limitedItemGrantMode(
+      bombUsesThisRun,
+      bombToolInventoryCount(),
+      BOMB_MAX_USES_PER_RUN,
+      bombFreeUsedThisRun
+    );
   }
 
   function openBombToolPanel() {
@@ -863,7 +906,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   function consumeBombToolItem() {
     if (bombFreeItemAvailable) {
       bombFreeItemAvailable = false;
+      bombFreeUsedThisRun = true;
       storage.saveBombFreeUsed(true);
+      return true;
+    }
+    if (bombShareItemsThisRun > 0) {
+      bombShareItemsThisRun -= 1;
       return true;
     }
     if (bombAdItemsThisRun > 0) {
@@ -879,6 +927,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       return;
     }
     const mode = bombToolPanelMode();
+    if (mode === "share") {
+      requestBombToolShare();
+      return;
+    }
     if (mode === "ad") {
       requestBombToolAd();
       return;
@@ -892,10 +944,60 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     overlay = null;
   }
 
+  function requestBombToolShare() {
+    if (
+      pendingBombShare ||
+      bombFreeItemAvailable ||
+      (bombUsesThisRun > 0 && !bombFreeUsedThisRun) ||
+      bombUsesThisRun > 1 ||
+      bombUsesThisRun + bombToolInventoryCount() >= BOMB_MAX_USES_PER_RUN ||
+      game.getState().state !== "aiming"
+    ) {
+      return;
+    }
+
+    bombToolMessage = "";
+    pendingBombShare = true;
+    persistProgress(true);
+    try {
+      if (typeof wxApi.shareAppMessage !== "function") {
+        throw new Error("share unavailable");
+      }
+      wxApi.shareAppMessage(createSharePayload("bomb-tool"));
+    } catch {
+      pendingBombShare = false;
+      bombToolMessage = texts.bombShareFailed;
+      persistProgress(true);
+    }
+  }
+
+  function completePendingBombShare() {
+    if (!pendingBombShare) {
+      return false;
+    }
+
+    pendingBombShare = false;
+    if (
+      (bombUsesThisRun > 0 && !bombFreeUsedThisRun) ||
+      bombUsesThisRun > 1 ||
+      bombUsesThisRun + bombToolInventoryCount() >= BOMB_MAX_USES_PER_RUN
+    ) {
+      persistProgress(true);
+      return false;
+    }
+    bombShareItemsThisRun += 1;
+    bombToolMessage = texts.bombShareRewarded;
+    persistProgress(true);
+    return true;
+  }
+
   function requestBombToolAd() {
     if (
       bombAdLoading ||
-      bombUsesThisRun >= BOMB_MAX_USES_PER_RUN ||
+      bombFreeItemAvailable ||
+      bombUsesThisRun === 0 ||
+      (bombUsesThisRun === 1 && bombFreeUsedThisRun) ||
+      bombUsesThisRun + bombToolInventoryCount() >= BOMB_MAX_USES_PER_RUN ||
       rewardedAdPurpose
     ) {
       return;
@@ -1118,10 +1220,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   function freezeToolPanelMode() {
-    if (freezeUsesThisRun >= FREEZE_MAX_USES_PER_RUN) {
-      return "limit";
-    }
-    return freezeToolInventoryCount() > 0 ? "use" : "share";
+    return limitedItemGrantMode(
+      freezeUsesThisRun,
+      freezeToolInventoryCount(),
+      FREEZE_MAX_USES_PER_RUN,
+      freezeFreeUsedThisRun
+    );
   }
 
   function openFreezeToolPanel() {
@@ -1138,11 +1242,16 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   function consumeFreezeToolItem() {
     if (freezeFreeItemAvailable) {
       freezeFreeItemAvailable = false;
+      freezeFreeUsedThisRun = true;
       storage.saveFreezeFreeUsed(true);
       return true;
     }
     if (freezeShareItemsThisRun > 0) {
       freezeShareItemsThisRun -= 1;
+      return true;
+    }
+    if (freezeAdItemsThisRun > 0) {
+      freezeAdItemsThisRun -= 1;
       return true;
     }
     return false;
@@ -1158,7 +1267,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   function requestFreezeToolShare() {
     if (
       pendingFreezeShare ||
-      freezeUsesThisRun >= FREEZE_MAX_USES_PER_RUN ||
+      freezeFreeItemAvailable ||
+      (freezeUsesThisRun > 0 && !freezeFreeUsedThisRun) ||
+      freezeUsesThisRun > 1 ||
+      freezeUsesThisRun + freezeToolInventoryCount() >= FREEZE_MAX_USES_PER_RUN ||
       game.getState().state !== "aiming"
     ) {
       return;
@@ -1183,13 +1295,49 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
 
     pendingFreezeShare = false;
-    if (freezeUsesThisRun >= FREEZE_MAX_USES_PER_RUN) {
+    if (
+      (freezeUsesThisRun > 0 && !freezeFreeUsedThisRun) ||
+      freezeUsesThisRun > 1 ||
+      freezeUsesThisRun + freezeToolInventoryCount() >= FREEZE_MAX_USES_PER_RUN
+    ) {
+      persistProgress(true);
       return false;
     }
     freezeShareItemsThisRun += 1;
     freezeToolMessage = texts.freezeShareRewarded;
     persistProgress(true);
     return true;
+  }
+
+  function requestFreezeToolAd() {
+    if (
+      freezeAdLoading ||
+      freezeFreeItemAvailable ||
+      freezeUsesThisRun === 0 ||
+      (freezeUsesThisRun === 1 && freezeFreeUsedThisRun) ||
+      freezeUsesThisRun + freezeToolInventoryCount() >= FREEZE_MAX_USES_PER_RUN ||
+      rewardedAdPurpose
+    ) {
+      return;
+    }
+
+    if (!rewardedVideoAd) {
+      freezeToolMessage = texts.freezeAdFailed;
+      return;
+    }
+
+    freezeAdLoading = true;
+    rewardedAdPurpose = "freeze-tool";
+    freezeToolMessage = texts.freezeAdLoading;
+    const showAd = () => rewardedVideoAd.show?.();
+    Promise.resolve()
+      .then(showAd)
+      .catch(() => Promise.resolve(rewardedVideoAd.load?.()).then(() => rewardedVideoAd.show?.()))
+      .catch(() => {
+        freezeAdLoading = false;
+        rewardedAdPurpose = null;
+        freezeToolMessage = texts.freezeAdFailed;
+      });
   }
 
   function confirmFreezeToolUse() {
@@ -1201,6 +1349,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     const mode = freezeToolPanelMode();
     if (mode === "share") {
       requestFreezeToolShare();
+      return;
+    }
+    if (mode === "ad") {
+      requestFreezeToolAd();
       return;
     }
     if (mode !== "use" || !game.activateFreeze()) {
@@ -1219,10 +1371,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   function rageToolPanelMode() {
-    if (rageUsesThisRun >= RAGE_MAX_USES_PER_RUN) {
-      return "limit";
-    }
-    return rageToolInventoryCount() > 0 ? "use" : "share";
+    return limitedItemGrantMode(
+      rageUsesThisRun,
+      rageToolInventoryCount(),
+      RAGE_MAX_USES_PER_RUN,
+      rageFreeUsedThisRun
+    );
   }
 
   function openRageToolPanel() {
@@ -1240,11 +1394,16 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   function consumeRageToolItem() {
     if (rageFreeItemAvailable) {
       rageFreeItemAvailable = false;
+      rageFreeUsedThisRun = true;
       storage.saveRageFreeUsed(true);
       return true;
     }
     if (rageShareItemsThisRun > 0) {
       rageShareItemsThisRun -= 1;
+      return true;
+    }
+    if (rageAdItemsThisRun > 0) {
+      rageAdItemsThisRun -= 1;
       return true;
     }
     return false;
@@ -1253,6 +1412,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   function requestRageToolShare() {
     if (
       pendingRageShare ||
+      rageFreeItemAvailable ||
+      (rageUsesThisRun > 0 && !rageFreeUsedThisRun) ||
+      rageUsesThisRun > 1 ||
       rageUsesThisRun + rageToolInventoryCount() >= RAGE_MAX_USES_PER_RUN ||
       game.getState().state !== "aiming"
     ) {
@@ -1280,7 +1442,11 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
 
     pendingRageShare = false;
-    if (rageUsesThisRun + rageToolInventoryCount() >= RAGE_MAX_USES_PER_RUN) {
+    if (
+      (rageUsesThisRun > 0 && !rageFreeUsedThisRun) ||
+      rageUsesThisRun > 1 ||
+      rageUsesThisRun + rageToolInventoryCount() >= RAGE_MAX_USES_PER_RUN
+    ) {
       persistProgress(true);
       return false;
     }
@@ -1288,6 +1454,37 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     rageToolMessage = texts.rageShareRewarded;
     persistProgress(true);
     return true;
+  }
+
+  function requestRageToolAd() {
+    if (
+      rageAdLoading ||
+      rageFreeItemAvailable ||
+      rageUsesThisRun === 0 ||
+      (rageUsesThisRun === 1 && rageFreeUsedThisRun) ||
+      rageUsesThisRun + rageToolInventoryCount() >= RAGE_MAX_USES_PER_RUN ||
+      rewardedAdPurpose
+    ) {
+      return;
+    }
+
+    if (!rewardedVideoAd) {
+      rageToolMessage = texts.rageAdFailed;
+      return;
+    }
+
+    rageAdLoading = true;
+    rewardedAdPurpose = "rage-tool";
+    rageToolMessage = texts.rageAdLoading;
+    const showAd = () => rewardedVideoAd.show?.();
+    Promise.resolve()
+      .then(showAd)
+      .catch(() => Promise.resolve(rewardedVideoAd.load?.()).then(() => rewardedVideoAd.show?.()))
+      .catch(() => {
+        rageAdLoading = false;
+        rewardedAdPurpose = null;
+        rageToolMessage = texts.rageAdFailed;
+      });
   }
 
   function confirmRageToolUse() {
@@ -1298,6 +1495,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     const mode = rageToolPanelMode();
     if (mode === "share") {
       requestRageToolShare();
+      return;
+    }
+    if (mode === "ad") {
+      requestRageToolAd();
       return;
     }
     if (mode !== "use" || !game.activateRage()) {
@@ -1319,7 +1520,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   function requestClearToolAd() {
-    if (clearAdLoading || clearUsesThisRun >= CLEAR_TOOL_MAX_USES_PER_RUN) {
+    if (
+      clearAdLoading ||
+      clearFreeItemAvailable ||
+      clearUsesThisRun + clearToolInventoryCount() >= CLEAR_TOOL_MAX_USES_PER_RUN ||
+      rewardedAdPurpose
+    ) {
       return;
     }
 
@@ -1369,6 +1575,30 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       return;
     }
 
+    if (purpose === "freeze-tool") {
+      freezeAdLoading = false;
+      if (completed) {
+        freezeAdItemsThisRun += 1;
+        freezeToolMessage = texts.freezeAdRewarded;
+        persistProgress(true);
+      } else {
+        freezeToolMessage = "";
+      }
+      return;
+    }
+
+    if (purpose === "rage-tool") {
+      rageAdLoading = false;
+      if (completed) {
+        rageAdItemsThisRun += 1;
+        rageToolMessage = texts.rageAdRewarded;
+        persistProgress(true);
+      } else {
+        rageToolMessage = "";
+      }
+      return;
+    }
+
     clearAdLoading = false;
     if (purpose === "clear-tool" && completed) {
       clearAdItemsThisRun += 1;
@@ -1390,6 +1620,16 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     if (purpose === "bomb-tool") {
       bombAdLoading = false;
       bombToolMessage = texts.bombAdFailed;
+      return;
+    }
+    if (purpose === "freeze-tool") {
+      freezeAdLoading = false;
+      freezeToolMessage = texts.freezeAdFailed;
+      return;
+    }
+    if (purpose === "rage-tool") {
+      rageAdLoading = false;
+      rageToolMessage = texts.rageAdFailed;
       return;
     }
     clearAdLoading = false;
@@ -1560,28 +1800,43 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     hasStartedRun = true;
     continueUsedThisRun = progress.continueUsedThisRun === true;
     runCoinsEarned = Math.max(0, Math.floor(Number(progress.runCoinsEarned) || 0));
-    clearFreeItemAvailable = progress.clearFreeItemAvailable !== false && storage.loadClearFreeUsed() !== true;
     clearAdItemsThisRun = Math.max(0, Math.floor(Number(progress.clearAdItemsThisRun) || 0));
     clearUsesThisRun = Math.max(0, Math.floor(Number(progress.clearUsesThisRun) || 0));
+    clearFreeItemAvailable = progress.clearFreeItemAvailable !== false && storage.loadClearFreeUsed() !== true;
     bombFreeItemAvailable = progress.bombFreeItemAvailable !== false &&
       storage.loadBombFreeUsed() !== true;
+    bombFreeUsedThisRun = progress.bombFreeUsedThisRun === true;
+    bombShareItemsThisRun = Math.max(
+      0,
+      Math.floor(Number(progress.bombShareItemsThisRun) || 0)
+    );
     bombAdItemsThisRun = Math.max(
       0,
-      Math.floor(Number(progress.bombAdItemsThisRun ?? progress.bombShareItemsThisRun) || 0)
+      Math.floor(Number(progress.bombAdItemsThisRun) || 0)
     );
     bombUsesThisRun = Math.max(0, Math.floor(Number(progress.bombUsesThisRun) || 0));
     freezeFreeItemAvailable = progress.freezeFreeItemAvailable !== false &&
       storage.loadFreezeFreeUsed() !== true;
+    freezeFreeUsedThisRun = progress.freezeFreeUsedThisRun === true;
     freezeShareItemsThisRun = Math.max(
       0,
       Math.floor(Number(progress.freezeShareItemsThisRun) || 0)
     );
+    freezeAdItemsThisRun = Math.max(
+      0,
+      Math.floor(Number(progress.freezeAdItemsThisRun) || 0)
+    );
     freezeUsesThisRun = Math.max(0, Math.floor(Number(progress.freezeUsesThisRun) || 0));
     rageFreeItemAvailable = progress.rageFreeItemAvailable !== false &&
       storage.loadRageFreeUsed() !== true;
+    rageFreeUsedThisRun = progress.rageFreeUsedThisRun === true;
     rageShareItemsThisRun = Math.max(
       0,
       Math.floor(Number(progress.rageShareItemsThisRun) || 0)
+    );
+    rageAdItemsThisRun = Math.max(
+      0,
+      Math.floor(Number(progress.rageAdItemsThisRun) || 0)
     );
     rageUsesThisRun = Math.max(0, Math.floor(Number(progress.rageUsesThisRun) || 0));
     clearToolMessage = "";
@@ -1589,13 +1844,16 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     clearAdLoading = false;
     bombToolMessage = "";
     bombAdLoading = false;
+    pendingBombShare = progress.pendingBombShare === true;
     bombPlacementArmed = false;
     bombDrag = null;
     bombAnimation = null;
     freezeToolMessage = "";
+    freezeAdLoading = false;
     freezeAnimation = null;
-    pendingFreezeShare = false;
+    pendingFreezeShare = progress.pendingFreezeShare === true;
     rageToolMessage = "";
+    rageAdLoading = false;
     rageAnimation = null;
     pendingRageShare = progress.pendingRageShare === true;
     rewardedAdPurpose = null;
@@ -1645,23 +1903,32 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     clearToolAnimation = null;
     clearAdLoading = false;
     bombFreeItemAvailable = storage.loadBombFreeUsed() !== true;
+    bombFreeUsedThisRun = false;
+    bombShareItemsThisRun = 0;
     bombAdItemsThisRun = 0;
     bombUsesThisRun = 0;
     bombToolMessage = "";
     bombAdLoading = false;
+    pendingBombShare = false;
     bombPlacementArmed = false;
     bombDrag = null;
     bombAnimation = null;
     freezeFreeItemAvailable = storage.loadFreezeFreeUsed() !== true;
+    freezeFreeUsedThisRun = false;
     freezeShareItemsThisRun = 0;
+    freezeAdItemsThisRun = 0;
     freezeUsesThisRun = 0;
     freezeToolMessage = "";
+    freezeAdLoading = false;
     freezeAnimation = null;
     pendingFreezeShare = false;
     rageFreeItemAvailable = storage.loadRageFreeUsed() !== true;
+    rageFreeUsedThisRun = false;
     rageShareItemsThisRun = 0;
+    rageAdItemsThisRun = 0;
     rageUsesThisRun = 0;
     rageToolMessage = "";
+    rageAdLoading = false;
     rageAnimation = null;
     pendingRageShare = false;
     game.restart();
@@ -4332,7 +4599,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
 
     if (bombToolMessage) {
-      context.fillStyle = bombToolMessage === texts.bombAdFailed ? "#fca5a5" : "#facc15";
+      context.fillStyle = (
+        bombToolMessage === texts.bombAdFailed ||
+        bombToolMessage === texts.bombShareFailed
+      ) ? "#fca5a5" : "#facc15";
       context.font = "700 14px sans-serif";
       context.fillText(
         bombToolMessage,
@@ -4344,7 +4614,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     if (!confirmButton) {
       return;
     }
-    if (mode === "ad") {
+    if (mode === "share" || mode === "ad") {
       roundedRect(
         context,
         confirmButton.x,
@@ -4355,15 +4625,16 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       );
       context.fillStyle = "#f2b400";
       context.fill();
-      const label = texts.bombAdConfirm;
+      const label = mode === "share" ? texts.bombShareConfirm : texts.bombAdConfirm;
       const iconSize = 24;
       const gap = 8;
       context.font = "700 20px sans-serif";
       const textWidth = context.measureText(label).width;
       const contentX = confirmButton.x + (confirmButton.width - iconSize - gap - textWidth) / 2;
       const centerY = confirmButton.y + confirmButton.height / 2;
-      if (shareIconAsset.loaded && shareIconAsset.image) {
-        context.drawImage(shareIconAsset.image, contentX, centerY - iconSize / 2, iconSize, iconSize);
+      const iconAsset = mode === "share" ? shareIconAsset : adVideoIconAsset;
+      if (iconAsset.loaded && iconAsset.image) {
+        context.drawImage(iconAsset.image, contentX, centerY - iconSize / 2, iconSize, iconSize);
       }
       context.fillStyle = "#1d1d1d";
       context.textAlign = "left";
@@ -4392,7 +4663,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
 
     if (freezeToolMessage) {
-      context.fillStyle = freezeToolMessage === texts.freezeShareFailed ? "#fca5a5" : "#67e8f9";
+      context.fillStyle = (
+        freezeToolMessage === texts.freezeShareFailed ||
+        freezeToolMessage === texts.freezeAdFailed
+      ) ? "#fca5a5" : "#67e8f9";
       context.font = "700 14px sans-serif";
       context.fillText(
         freezeToolMessage,
@@ -4404,7 +4678,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     if (!confirmButton) {
       return;
     }
-    if (mode === "share") {
+    if (mode === "share" || mode === "ad") {
       roundedRect(
         context,
         confirmButton.x,
@@ -4415,15 +4689,16 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       );
       context.fillStyle = "#67e8f9";
       context.fill();
-      const label = texts.freezeShareConfirm;
+      const label = mode === "share" ? texts.freezeShareConfirm : texts.freezeAdConfirm;
       const iconSize = 24;
       const gap = 8;
       context.font = "700 20px sans-serif";
       const textWidth = context.measureText(label).width;
       const contentX = confirmButton.x + (confirmButton.width - iconSize - gap - textWidth) / 2;
       const centerY = confirmButton.y + confirmButton.height / 2;
-      if (shareIconAsset.loaded && shareIconAsset.image) {
-        context.drawImage(shareIconAsset.image, contentX, centerY - iconSize / 2, iconSize, iconSize);
+      const iconAsset = mode === "share" ? shareIconAsset : adVideoIconAsset;
+      if (iconAsset.loaded && iconAsset.image) {
+        context.drawImage(iconAsset.image, contentX, centerY - iconSize / 2, iconSize, iconSize);
       }
       context.fillStyle = "#10243d";
       context.textAlign = "left";
@@ -4452,7 +4727,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
 
     if (rageToolMessage) {
-      context.fillStyle = rageToolMessage === texts.rageShareFailed ? "#fca5a5" : "#ff8a65";
+      context.fillStyle = (
+        rageToolMessage === texts.rageShareFailed ||
+        rageToolMessage === texts.rageAdFailed
+      ) ? "#fca5a5" : "#ff8a65";
       context.font = "700 14px sans-serif";
       context.fillText(
         rageToolMessage,
@@ -4464,7 +4742,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     if (!confirmButton) {
       return;
     }
-    if (mode === "share") {
+    if (mode === "share" || mode === "ad") {
       roundedRect(
         context,
         confirmButton.x,
@@ -4483,15 +4761,16 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       buttonGradient.addColorStop(1, "#ff8a1f");
       context.fillStyle = buttonGradient;
       context.fill();
-      const label = texts.rageShareConfirm;
+      const label = mode === "share" ? texts.rageShareConfirm : texts.rageAdConfirm;
       const iconSize = 24;
       const gap = 8;
       context.font = "700 20px sans-serif";
       const textWidth = context.measureText(label).width;
       const contentX = confirmButton.x + (confirmButton.width - iconSize - gap - textWidth) / 2;
       const centerY = confirmButton.y + confirmButton.height / 2;
-      if (shareIconAsset.loaded && shareIconAsset.image) {
-        context.drawImage(shareIconAsset.image, contentX, centerY - iconSize / 2, iconSize, iconSize);
+      const iconAsset = mode === "share" ? shareIconAsset : adVideoIconAsset;
+      if (iconAsset.loaded && iconAsset.image) {
+        context.drawImage(iconAsset.image, contentX, centerY - iconSize / 2, iconSize, iconSize);
       }
       context.fillStyle = "#ffffff";
       context.textAlign = "left";
@@ -5966,6 +6245,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   });
   wxApi.onShow?.(() => {
     if (completePendingDoubleCoinShare()) {
+      return;
+    }
+    if (completePendingBombShare()) {
       return;
     }
     if (completePendingRageShare()) {
