@@ -378,6 +378,9 @@ canvas {
 #settingsOverlay .overlay-card {
   gap: 18px;
   padding: 28px 24px;
+  max-height: calc(var(--viewport-height) - var(--safe-top) - var(--safe-bottom) - 32px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .shop-card {
@@ -710,6 +713,16 @@ canvas {
   .status-text {
     margin-top: 6px;
     min-height: 1.2em;
+  }
+
+  #settingsOverlay .overlay-card {
+    gap: 12px;
+    padding: 20px 18px;
+  }
+
+  .sound-toggle {
+    padding: 11px 14px;
+    border-radius: 14px;
   }
 }
 

@@ -161,22 +161,23 @@ function settingsPanelRect(rect) {
   const panelSideInset = 24;
   return {
     x: rect.x + panelSideInset,
-    y: rect.y + rect.height * 0.24,
+    y: rect.y + rect.height * 0.12,
     width: rect.width - panelSideInset * 2,
-    height: rect.height * 0.7
+    height: rect.height * 0.64
   };
 }
 
 function settingsLayout(panel) {
   const horizontalInset = clamp(panel.width * 0.11, 28, 36);
-  const buttonHeight = 48;
-  const doneHeight = 52;
+  const buttonHeight = clamp(panel.height * 0.11, 40, 48);
+  const doneHeight = clamp(panel.height * 0.12, 44, 52);
   const doneY = panel.y + panel.height - horizontalInset - doneHeight;
-  const contentTop = panel.y + 88;
-  const contentBottom = doneY - 20;
+  const contentTop = panel.y + clamp(panel.height * 0.2, 64, 88);
+  const contentBottom = doneY - clamp(panel.height * 0.045, 12, 20);
   const rowCount = 3;
-  const availableHeight = Math.max(buttonHeight * rowCount + 14 * (rowCount - 1), contentBottom - contentTop);
-  const rowGap = clamp((availableHeight - buttonHeight * rowCount) / (rowCount - 1), 14, 24);
+  const minimumRowGap = 12;
+  const availableHeight = Math.max(buttonHeight * rowCount + minimumRowGap * (rowCount - 1), contentBottom - contentTop);
+  const rowGap = clamp((availableHeight - buttonHeight * rowCount) / (rowCount - 1), minimumRowGap, 24);
   const rowsHeight = buttonHeight * rowCount + rowGap * (rowCount - 1);
   const firstRowY = contentTop + Math.max(0, (availableHeight - rowsHeight) / 2);
   const toggleWidth = clamp(panel.width * 0.32, 96, 106);
