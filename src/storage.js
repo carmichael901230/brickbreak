@@ -3,6 +3,7 @@ import { STORAGE_KEYS } from "./config.js";
 const defaultSettings = {
   soundEnabled: true,
   vibrationEnabled: true,
+  effectsEnabled: true,
   language: "zh-CN"
 };
 

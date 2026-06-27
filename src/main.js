@@ -25,6 +25,7 @@ const menuHeartCounter = document.querySelector("#menuHeartCounter");
 const menuHeartValue = document.querySelector("#menuHeartValue");
 const statusText = document.querySelector("#statusText");
 const soundToggle = document.querySelector("#soundToggle");
+const effectsToggle = document.querySelector("#effectsToggle");
 const speedButton = document.querySelector("#speedButton");
 const pauseOverlay = document.querySelector("#pauseOverlay");
 const settingsOverlay = document.querySelector("#settingsOverlay");
@@ -58,6 +59,8 @@ const settings = storage.loadSettings();
 const audioBus = createAudioBus();
 audioBus.setEnabled(settings.soundEnabled);
 soundToggle.checked = settings.soundEnabled;
+let effectsEnabled = settings.effectsEnabled !== false;
+effectsToggle.checked = effectsEnabled;
 const coinSound = typeof Audio === "undefined" ? null : new Audio("./src/assets/sound/coin.mp3");
 const reviveSound = typeof Audio === "undefined" ? null : new Audio("./src/assets/sound/revive.mp3");
 
@@ -79,6 +82,7 @@ const game = createGameController({
   initialCoins: storage.loadCoins(),
   initialHearts: storage.loadHearts(),
   initialSkins: storage.loadSkins(),
+  effectsEnabled,
   boardGenerator,
   audioBus
 });
@@ -503,7 +507,13 @@ pauseButton.addEventListener("click", () => {
 
 soundToggle.addEventListener("change", () => {
   audioBus.setEnabled(soundToggle.checked);
-  storage.saveSettings({ soundEnabled: soundToggle.checked });
+  storage.saveSettings({ soundEnabled: soundToggle.checked, effectsEnabled });
+});
+
+effectsToggle.addEventListener("change", () => {
+  effectsEnabled = effectsToggle.checked;
+  game.setEffectsEnabled(effectsEnabled);
+  storage.saveSettings({ soundEnabled: soundToggle.checked, effectsEnabled });
 });
 
 speedButton.addEventListener("click", () => {

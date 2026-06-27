@@ -26,6 +26,7 @@ test("storage adapter falls back safely on corrupt settings", () => {
   assert.deepEqual(adapter.loadSettings(), {
     soundEnabled: true,
     vibrationEnabled: true,
+    effectsEnabled: true,
     language: "zh-CN"
   });
 });

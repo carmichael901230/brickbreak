@@ -99,6 +99,10 @@ test("clearLowestBlockRows removes only the lowest occupied block rows", () => {
 test("clearBlocksInArea removes bricks in a clipped 3x3 area only", () => {
   const game = createGameController({
     boardGenerator: createBoardGenerator([{ blocks: [], pickups: [], coins: [] }]),
+    initialSkins: {
+      selected: { brick: "brick-candy", ball: null },
+      owned: { brick: ["brick-candy"], ball: [] }
+    },
     audioBus: createAudioBus()
   });
   const state = game.getState();
@@ -117,6 +121,12 @@ test("clearBlocksInArea removes bricks in a clipped 3x3 area only", () => {
   assert.deepEqual(state.blocks.map((block) => block.id), ["far", "edge"]);
   assert.deepEqual(state.pickups.map((pickup) => pickup.id), ["p1"]);
   assert.deepEqual(state.coinsOnBoard.map((coin) => coin.id), ["c1"]);
+  assert.equal(state.particles.filter((particle) => particle.shape === "shard").length, 36);
+  assert.ok(
+    state.particles
+      .filter((particle) => particle.shape === "shard")
+      .every((particle) => ["rgba(255, 111, 97, 0.92)", "rgba(255, 209, 203, 0.82)"].includes(particle.color))
+  );
 });
 
 test("clearBlocksInArea handles board edges", () => {

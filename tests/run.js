@@ -257,6 +257,7 @@ test("storage adapter falls back safely on corrupt settings", () => {
   assert.deepEqual(adapter.loadSettings(), {
     soundEnabled: true,
     vibrationEnabled: true,
+    effectsEnabled: true,
     language: "zh-CN"
   });
 });
@@ -629,7 +630,41 @@ test("coins are collected on contact and emit a coin event", () => {
 
   assert.equal(game.getState().coins, 1);
   assert.equal(game.getState().coinsOnBoard[0].collected, true);
-  assert.equal(audioBus.events.some((event) => event.type === "coin"), true);
+  const coinEvent = audioBus.events.find((event) => event.type === "coin");
+  assert.ok(coinEvent);
+  assert.equal(coinEvent.payload.coins, 1);
+  assert.equal(coinEvent.payload.x, position.x + game.getState().arena.blockSize / 2);
+  assert.equal(coinEvent.payload.y, position.y + game.getState().arena.blockSize / 2);
+});
+
+test("pickups are collected on contact and emit source coordinates", () => {
+  const audioBus = createRecordingAudioBus();
+  const game = createGameController({
+    boardGenerator: createRoundSequence([
+      { blocks: [], pickups: [{ id: "p1", row: 0, column: 2, collected: false }], coins: [] },
+      { blocks: [], pickups: [], coins: [] }
+    ]),
+    audioBus
+  });
+
+  const pickup = game.getState().pickups[0];
+  const position = game.getEntityPosition(pickup);
+  const ball = game.getState().balls[0];
+  ball.active = true;
+  ball.returned = false;
+  ball.x = position.x + game.getState().arena.blockSize / 2;
+  ball.y = position.y + game.getState().arena.blockSize / 2;
+  ball.vx = 0;
+  ball.vy = 0;
+  game.getState().state = "resolving";
+
+  game.update(0.016);
+
+  assert.equal(game.getState().pickups[0].collected, true);
+  const pickupEvent = audioBus.events.find((event) => event.type === "pickup");
+  assert.ok(pickupEvent);
+  assert.equal(pickupEvent.payload.x, position.x + game.getState().arena.blockSize / 2);
+  assert.equal(pickupEvent.payload.y, position.y + game.getState().arena.blockSize / 2);
 });
 
 test("clearLowestBlockRows removes only the lowest occupied block rows", () => {
@@ -655,6 +690,54 @@ test("clearLowestBlockRows removes only the lowest occupied block rows", () => {
   assert.deepEqual(state.pickups.map((pickup) => pickup.id), ["p1"]);
   assert.deepEqual(state.coinsOnBoard.map((coin) => coin.id), ["c1"]);
   assert.equal(result.removedBlocks.length, 3);
+});
+
+test("clearBlocksInArea emits break shards for removed bricks", () => {
+  const game = createGameController({
+    boardGenerator: createRoundSequence([{ blocks: [], pickups: [], coins: [] }]),
+    initialSkins: {
+      selected: { brick: "brick-candy", ball: null },
+      owned: { brick: ["brick-candy"], ball: [] }
+    },
+    audioBus: createSilentAudioBus()
+  });
+  const state = game.getState();
+  state.blocks = [
+    { id: "center", row: 2, column: 2, hp: 1 },
+    { id: "near", row: 3, column: 3, hp: 1 },
+    { id: "far", row: 4, column: 4, hp: 1 }
+  ];
+
+  const result = game.clearBlocksInArea(2, 2, 1);
+
+  assert.deepEqual(result.removedBlocks.map((removed) => removed.block.id), ["center", "near"]);
+  assert.deepEqual(state.blocks.map((block) => block.id), ["far"]);
+  assert.equal(state.particles.filter((particle) => particle.shape === "shard").length, 36);
+  assert.ok(
+    state.particles
+      .filter((particle) => particle.shape === "shard")
+      .every((particle) => ["rgba(255, 111, 97, 0.92)", "rgba(255, 209, 203, 0.82)"].includes(particle.color))
+  );
+});
+
+test("disabled effects suppress gameplay particles and break shards", () => {
+  const game = createGameController({
+    boardGenerator: createRoundSequence([{ blocks: [], pickups: [], coins: [] }]),
+    effectsEnabled: false,
+    audioBus: createSilentAudioBus()
+  });
+  const state = game.getState();
+  state.blocks = [
+    { id: "center", row: 2, column: 2, hp: 1 },
+    { id: "near", row: 3, column: 3, hp: 1 }
+  ];
+
+  const result = game.clearBlocksInArea(2, 2, 1);
+
+  assert.deepEqual(result.removedBlocks.map((removed) => removed.block.id), ["center", "near"]);
+  assert.equal(state.particles.length, 0);
+  game.setEffectsEnabled(true);
+  assert.equal(game.areEffectsEnabled(), true);
 });
 
 test("clear and bomb item effects are rejected during a volley", () => {

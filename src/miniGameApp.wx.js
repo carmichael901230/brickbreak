@@ -32,6 +32,7 @@ const texts = {
   resume: "继续游戏",
   soundLabel: "音效",
   vibrationLabel: "震动",
+  effectsLabel: "特效",
   soundOn: "开",
   soundOff: "关",
   done: "完成",
@@ -51,6 +52,8 @@ const texts = {
   dailyReset: "连续签到中断，从第 1 天开始",
   dailyRewards: "每日奖励",
   leaderboard: "排行榜",
+  feedback: "我要吐槽",
+  feedbackUnavailable: "请点击右上角“···”，选择“反馈与投诉”",
   totalRank: "总排名",
   myRank: "我的排名",
   rankPosition: (rank) => `第 ${rank} 名`,
@@ -171,9 +174,10 @@ function settingsLayout(panel) {
   const doneY = panel.y + panel.height - horizontalInset - doneHeight;
   const contentTop = panel.y + 88;
   const contentBottom = doneY - 20;
-  const availableHeight = Math.max(buttonHeight * 2 + 14, contentBottom - contentTop);
-  const rowGap = clamp(availableHeight - buttonHeight * 2, 16, 28);
-  const rowsHeight = buttonHeight * 2 + rowGap;
+  const rowCount = 3;
+  const availableHeight = Math.max(buttonHeight * rowCount + 14 * (rowCount - 1), contentBottom - contentTop);
+  const rowGap = clamp((availableHeight - buttonHeight * rowCount) / (rowCount - 1), 14, 24);
+  const rowsHeight = buttonHeight * rowCount + rowGap * (rowCount - 1);
   const firstRowY = contentTop + Math.max(0, (availableHeight - rowsHeight) / 2);
   const toggleWidth = clamp(panel.width * 0.32, 96, 106);
 
@@ -184,6 +188,7 @@ function settingsLayout(panel) {
     buttonHeight,
     soundY: firstRowY,
     vibrationY: firstRowY + buttonHeight + rowGap,
+    effectsY: firstRowY + (buttonHeight + rowGap) * 2,
     doneX: panel.x + horizontalInset,
     doneY,
     doneWidth: panel.width - horizontalInset * 2,
@@ -378,8 +383,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   const audioBus = createAudioBus();
   audioBus.setEnabled(settings.soundEnabled);
   let vibrationEnabled = settings.vibrationEnabled !== false;
+  let effectsEnabled = settings.effectsEnabled !== false;
   const tutorialAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/tap.png");
-  const settingsIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/settings.png");
   const coinIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/dollar.png");
   const heartIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/heart.png");
   const speedIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/fast-forward.png");
@@ -392,6 +397,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   const rageItemIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/rage-item.png");
   const adVideoIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/ad-video.png");
   const shareIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/share.png");
+  const homeNavIconAssets = {
+    leaderboard: loadImageAsset(wxApi, canvas, "src/assets/pic/home-nav/leaderboard.png"),
+    shop: loadImageAsset(wxApi, canvas, "src/assets/pic/home-nav/shop.png"),
+    feedback: loadImageAsset(wxApi, canvas, "src/assets/pic/home-nav/feedback.png"),
+    "menu-settings": loadImageAsset(wxApi, canvas, "src/assets/pic/home-nav/settings.png")
+  };
   const leaderboardAvatarAssets = Object.fromEntries(
     FAKE_LEADERBOARD_USERS.map((user) => [user.avatar, loadImageAsset(wxApi, canvas, user.avatar)])
   );
@@ -471,15 +482,55 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     initialCoins: storage.loadCoins(),
     initialHearts: storage.loadHearts(),
     initialSkins: storage.loadSkins(),
+    effectsEnabled,
     boardGenerator,
     audioBus
   });
-  audioBus.onEvent(({ type }) => {
+
+  function startCoinCollectAnimation(payload = {}) {
+    if (!effectsEnabled || screen !== "game") {
+      return;
+    }
+
+    const rect = canvasRect();
+    const scaleX = rect.width / GAME_CONFIG.width;
+    const scaleY = rect.height / GAME_CONFIG.height;
+    coinCollectAnimations.push({
+      sourceX: rect.x + (Number(payload.x) || GAME_CONFIG.width / 2) * scaleX,
+      sourceY: rect.y + (Number(payload.y) || GAME_CONFIG.height / 2) * scaleY,
+      startedAt: Date.now(),
+      duration: 720
+    });
+    coinCollectAnimations = coinCollectAnimations.slice(-10);
+  }
+
+  function startAddBallCollectAnimation(payload = {}) {
+    if (!effectsEnabled || screen !== "game") {
+      return;
+    }
+
+    const rect = canvasRect();
+    const scaleX = rect.width / GAME_CONFIG.width;
+    const scaleY = rect.height / GAME_CONFIG.height;
+    addBallCollectAnimations.push({
+      sourceX: rect.x + (Number(payload.x) || GAME_CONFIG.width / 2) * scaleX,
+      sourceY: rect.y + (Number(payload.y) || GAME_CONFIG.height / 2) * scaleY,
+      startedAt: Date.now(),
+      duration: 820
+    });
+    addBallCollectAnimations = addBallCollectAnimations.slice(-8);
+  }
+
+  audioBus.onEvent(({ type, payload }) => {
     if (type === "hit") {
       hitSoundPlayer.play();
     }
+    if (type === "pickup") {
+      startAddBallCollectAnimation(payload);
+    }
     if (type === "coin") {
       coinSoundPlayer.play();
+      startCoinCollectAnimation(payload);
       if (hasStartedRun) {
         runCoinsEarned += 1;
       }
@@ -529,6 +580,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let shopDragStartY = 0;
   let shopDragStartScrollY = 0;
   let shopDragging = false;
+  let feedbackNativeButton = null;
+  let feedbackNativeButtonBounds = null;
+  let feedbackNativeUnavailable = false;
+  let feedbackWarningUntil = 0;
   let leaderboardScrollY = 0;
   let leaderboardDragStartY = 0;
   let leaderboardDragStartScrollY = 0;
@@ -576,6 +631,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let reviveAdLoading = false;
   let doubleCoinMessage = "";
   let coinDoubleAnimation = null;
+  let coinCollectAnimations = [];
+  let addBallCollectAnimations = [];
   let pendingDoubleCoinShare = null;
   let pendingCheckIn = null;
   let dailyRewardsView = null;
@@ -589,8 +646,19 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     storage.saveSettings({
       soundEnabled: audioBus.isEnabled(),
       vibrationEnabled,
+      effectsEnabled,
       language: "zh-CN"
     });
+  }
+
+  function setEffectsEnabled(enabled) {
+    effectsEnabled = enabled !== false;
+    game.setEffectsEnabled(effectsEnabled);
+    if (!effectsEnabled) {
+      coinCollectAnimations = [];
+      addBallCollectAnimations = [];
+    }
+    saveSettings();
   }
 
   function canvasRect() {
@@ -615,6 +683,29 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       bottomInset,
       horizontalPadding
     };
+  }
+
+  function homeBottomNavLayout(rect) {
+    const ids = ["leaderboard", "shop", "feedback", "menu-settings"];
+    const itemWidth = (screenWidth - rect.horizontalPadding * 2) / ids.length;
+    const iconSize = clamp(screenWidth * 0.128, 46, 56);
+    const labelFontSize = clamp(screenWidth * 0.034, 12, 14);
+    const iconLabelGap = clamp(screenWidth * 0.012, 4, 6);
+    const verticalPadding = 4;
+    const height = iconSize + iconLabelGap + labelFontSize + verticalPadding * 2;
+    const y = screenHeight - rect.bottomInset - height - 24;
+
+    return ids.map((id, index) => ({
+      id,
+      x: rect.horizontalPadding + itemWidth * index,
+      y,
+      width: itemWidth,
+      height,
+      iconSize,
+      labelFontSize,
+      iconLabelGap,
+      verticalPadding
+    }));
   }
 
   function toGamePoint(point) {
@@ -747,9 +838,6 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   function persistProgress(force = false) {
     const progress = buildProgressPayload();
     if (!progress) {
-      if (force) {
-        clearSavedProgress();
-      }
       return;
     }
 
@@ -1860,6 +1948,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     reviveAdLoading = false;
     doubleCoinMessage = "";
     coinDoubleAnimation = null;
+    coinCollectAnimations = [];
+    addBallCollectAnimations = [];
     pendingDoubleCoinShare = null;
     gameOverResult = null;
     newRecordCheerPlayed = false;
@@ -1942,6 +2032,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     reviveAdLoading = false;
     doubleCoinMessage = "";
     coinDoubleAnimation = null;
+    coinCollectAnimations = [];
+    addBallCollectAnimations = [];
     pendingDoubleCoinShare = null;
     screen = "game";
     overlay = null;
@@ -2059,6 +2151,100 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     pendingPurchase = null;
     shopMessage = "";
     shopScrollY = 0;
+  }
+
+  function showFeedbackUnavailable() {
+    feedbackWarningUntil = Date.now() + 2600;
+    try {
+      wxApi.showModal?.({
+        title: texts.feedback,
+        content: texts.feedbackUnavailable,
+        showCancel: false,
+        confirmText: texts.done
+      });
+    } catch {
+      // Canvas fallback below keeps feedback guidance visible if modal APIs are unavailable.
+    }
+  }
+
+  function hideFeedbackNativeButton() {
+    if (feedbackNativeButton?.hide) {
+      feedbackNativeButton.hide();
+    }
+  }
+
+  function destroyFeedbackNativeButton() {
+    if (feedbackNativeButton?.destroy) {
+      feedbackNativeButton.destroy();
+    }
+    feedbackNativeButton = null;
+    feedbackNativeButtonBounds = null;
+  }
+
+  function syncFeedbackNativeButton() {
+    if (feedbackNativeUnavailable) {
+      return;
+    }
+
+    if (typeof wxApi.createFeedbackButton !== "function") {
+      feedbackNativeUnavailable = true;
+      return;
+    }
+
+    if (screen !== "menu" || overlay !== null) {
+      hideFeedbackNativeButton();
+      return;
+    }
+
+    const feedbackButton = currentButtons().find((button) => button.id === "feedback");
+    if (!feedbackButton) {
+      hideFeedbackNativeButton();
+      return;
+    }
+
+    const bounds = {
+      left: Math.round(feedbackButton.x),
+      top: Math.round(feedbackButton.y),
+      width: Math.round(feedbackButton.width),
+      height: Math.round(feedbackButton.height)
+    };
+    const sameBounds = feedbackNativeButtonBounds &&
+      feedbackNativeButtonBounds.left === bounds.left &&
+      feedbackNativeButtonBounds.top === bounds.top &&
+      feedbackNativeButtonBounds.width === bounds.width &&
+      feedbackNativeButtonBounds.height === bounds.height;
+
+    if (feedbackNativeButton && sameBounds) {
+      feedbackNativeButton.show?.();
+      return;
+    }
+
+    destroyFeedbackNativeButton();
+    try {
+      feedbackNativeButton = wxApi.createFeedbackButton({
+        type: "text",
+        text: "",
+        style: {
+          left: bounds.left,
+          top: bounds.top,
+          width: bounds.width,
+          height: bounds.height,
+          lineHeight: bounds.height,
+          backgroundColor: "rgba(0,0,0,0)",
+          borderColor: "rgba(0,0,0,0)",
+          borderWidth: 0,
+          borderRadius: 0,
+          color: "rgba(0,0,0,0)",
+          fontSize: 1,
+          textAlign: "center"
+        }
+      });
+      feedbackNativeButtonBounds = bounds;
+      feedbackNativeButton.show?.();
+    } catch {
+      feedbackNativeUnavailable = true;
+      destroyFeedbackNativeButton();
+    }
   }
 
   function shopLayout() {
@@ -2182,17 +2368,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     const leaderboardPanel = leaderboardPanelRect(rect);
 
     if (screen === "menu") {
-      const buttons = overlay === "shop" || overlay === "settings" || overlay === "confirm-new-run" || overlay === "daily-checkin" || overlay === "leaderboard"
-        ? []
-        : [
-            {
-              id: "menu-settings",
-              x: rect.horizontalPadding,
-              y: rect.topInset + 10,
-              width: 60,
-              height: 60
-            }
-          ];
+      const buttons = [];
 
       if (overlay === "confirm-new-run") {
         buttons.push(
@@ -2273,22 +2449,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
             y: firstButtonY + (hasProgress ? 72 : 0),
             width: rect.width - 64,
             height: 56
-          },
-          {
-            id: "shop",
-            x: rect.x + 32,
-            y: firstButtonY + (hasProgress ? 144 : 98),
-            width: rect.width - 64,
-            height: 56
-          },
-          {
-            id: "leaderboard",
-            x: rect.x + 32,
-            y: firstButtonY + (hasProgress ? 216 : 170),
-            width: rect.width - 64,
-            height: 52
           }
         );
+        buttons.push(...homeBottomNavLayout(rect));
       }
 
       if (overlay === "settings") {
@@ -2305,6 +2468,13 @@ export function bootMiniGame(wxApi = globalThis.wx) {
             id: "toggle-vibration",
             x: settings.toggleX,
             y: settings.vibrationY,
+            width: settings.toggleWidth,
+            height: settings.buttonHeight
+          },
+          {
+            id: "toggle-effects",
+            x: settings.toggleX,
+            y: settings.effectsY,
             width: settings.toggleWidth,
             height: settings.buttonHeight
           },
@@ -2441,6 +2611,13 @@ export function bootMiniGame(wxApi = globalThis.wx) {
           id: "toggle-vibration",
           x: settings.toggleX,
           y: settings.vibrationY,
+          width: settings.toggleWidth,
+          height: settings.buttonHeight
+        },
+        {
+          id: "toggle-effects",
+          x: settings.toggleX,
+          y: settings.effectsY,
           width: settings.toggleWidth,
           height: settings.buttonHeight
         },
@@ -2643,6 +2820,11 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       case "daily-rewards":
         openDailyRewards();
         break;
+      case "feedback":
+        if (!wxApi.createFeedbackButton || feedbackNativeUnavailable || !feedbackNativeButton) {
+          showFeedbackUnavailable();
+        }
+        break;
       case "leaderboard":
         leaderboardScrollY = 0;
         overlay = "leaderboard";
@@ -2725,6 +2907,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       case "toggle-vibration":
         vibrationEnabled = !vibrationEnabled;
         saveSettings();
+        break;
+      case "toggle-effects":
+        setEffectsEnabled(!effectsEnabled);
         break;
       case "settings-done":
         overlay = screen === "menu" ? null : "pause";
@@ -3207,27 +3392,6 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     );
   }
 
-  function drawGearButton(context, button) {
-    if (!button) {
-      return;
-    }
-
-    roundedRect(context, button.x, button.y, button.width, button.height, 16);
-    context.fillStyle = "#171717";
-    context.fill();
-
-    if (settingsIconAsset.loaded && settingsIconAsset.image) {
-      const iconInset = 1;
-      context.drawImage(
-        settingsIconAsset.image,
-        button.x + iconInset,
-        button.y + iconInset,
-        button.width - iconInset * 2,
-        button.height - iconInset * 2
-      );
-    }
-  }
-
   function drawDailyRewardsButton(context, button) {
     if (!button) {
       return;
@@ -3279,6 +3443,80 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     context.strokeText(texts.dailyRewards, centerX, labelY);
     context.fillStyle = "#fff7d6";
     context.fillText(texts.dailyRewards, centerX, labelY);
+    context.restore();
+  }
+
+  function drawHomeBottomNav(context, buttons) {
+    const navButtons = buttons.filter((button) =>
+      ["leaderboard", "shop", "feedback", "menu-settings"].includes(button.id)
+    );
+    if (!navButtons.length) {
+      return;
+    }
+
+    const labels = {
+      leaderboard: texts.leaderboard,
+      shop: texts.shop,
+      feedback: texts.feedback,
+      "menu-settings": texts.settings
+    };
+    context.save();
+    for (const button of navButtons) {
+      const centerX = button.x + button.width / 2;
+      const iconSize = button.iconSize ?? 42;
+      const iconX = centerX - iconSize / 2;
+      const iconY = button.y + (button.verticalPadding ?? 4);
+      const asset = homeNavIconAssets[button.id];
+
+      if (asset?.loaded && asset.image) {
+        context.drawImage(asset.image, iconX, iconY, iconSize, iconSize);
+      } else {
+        context.beginPath();
+        context.arc(centerX, iconY + iconSize / 2, iconSize * 0.42, 0, Math.PI * 2);
+        context.fillStyle = button.id === "feedback"
+          ? "#ef4444"
+          : button.id === "shop"
+            ? "#f59e0b"
+            : button.id === "leaderboard"
+              ? "#facc15"
+              : "#60a5fa";
+        context.fill();
+      }
+
+      context.fillStyle = "rgba(255,255,255,0.86)";
+      context.font = `800 ${button.labelFontSize ?? 13}px sans-serif`;
+      context.textAlign = "center";
+      context.textBaseline = "alphabetic";
+      context.fillText(
+        labels[button.id],
+        centerX,
+        iconY + iconSize + (button.iconLabelGap ?? 5) + (button.labelFontSize ?? 13)
+      );
+    }
+    context.restore();
+  }
+
+  function drawFeedbackWarning(context) {
+    if (Date.now() >= feedbackWarningUntil) {
+      return;
+    }
+
+    const rect = canvasRect();
+    const navTop = homeBottomNavLayout(rect)[0]?.y ?? (screenHeight - rect.bottomInset - 82);
+    const text = texts.feedbackUnavailable;
+    context.save();
+    context.font = "800 14px sans-serif";
+    const width = Math.min(screenWidth - rect.horizontalPadding * 2, context.measureText(text).width + 34);
+    const height = 34;
+    const x = (screenWidth - width) / 2;
+    const y = navTop - height - 12;
+    roundedRect(context, x, y, width, height, 17);
+    context.fillStyle = "rgba(239,68,68,0.92)";
+    context.fill();
+    context.fillStyle = "#fff7ed";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(text, screenWidth / 2, y + height / 2 + 1);
     context.restore();
   }
 
@@ -4086,6 +4324,145 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     drawCoinCounter(context, screenWidth - rect.horizontalPadding, rect.topInset + 40, state.coins);
   }
 
+  function drawCoinCollectAnimations(context, state, rect) {
+    if (!effectsEnabled || !coinCollectAnimations.length) {
+      coinCollectAnimations = [];
+      return;
+    }
+
+    const now = Date.now();
+    const target = counterIconTarget(context, rect, "coin", state);
+    coinCollectAnimations = coinCollectAnimations.filter((animation) => now - animation.startedAt < animation.duration);
+    if (!coinCollectAnimations.length) {
+      return;
+    }
+
+    for (const animation of coinCollectAnimations) {
+      const elapsed = now - animation.startedAt;
+      const flight = clamp(elapsed / animation.duration, 0, 1);
+      if (flight <= 0 || flight >= 1) {
+        continue;
+      }
+
+      const eased = easeOutCubic(flight);
+      const arcLift = Math.sin(flight * Math.PI) * 46;
+      const x = lerp(animation.sourceX, target.x, eased);
+      const y = lerp(animation.sourceY, target.y, eased) - arcLift;
+      const size = lerp(30, 19, eased);
+      const alpha = 1 - Math.max(0, flight - 0.84) / 0.16;
+
+      drawRewardIcon(context, {
+        asset: coinIconAsset,
+        fallback: "$",
+        color: "#f2b400",
+        fallbackColor: "#1d1d1d"
+      }, x, y, size, alpha);
+
+      context.save();
+      context.globalAlpha = 0.5 * alpha;
+      context.fillStyle = "#facc15";
+      for (let spark = 0; spark < 3; spark += 1) {
+        const angle = spark * Math.PI * 0.72 + flight * Math.PI * 2;
+        context.beginPath();
+        context.arc(
+          x - Math.cos(angle) * (9 + spark * 3),
+          y - Math.sin(angle) * (7 + spark * 2),
+          2,
+          0,
+          Math.PI * 2
+        );
+        context.fill();
+      }
+      context.restore();
+    }
+
+    const glowProgress = clamp((now - Math.max(...coinCollectAnimations.map((animation) => animation.startedAt))) / 420, 0, 1);
+    if (glowProgress > 0) {
+      const glow = Math.sin(glowProgress * Math.PI);
+      context.save();
+      context.beginPath();
+      context.arc(target.x, target.y, 26 + glow * 9, 0, Math.PI * 2);
+      context.strokeStyle = `rgba(250,204,21,${0.18 + glow * 0.34})`;
+      context.lineWidth = 2;
+      context.stroke();
+      context.restore();
+    }
+
+    drawCoinCounter(context, screenWidth - rect.horizontalPadding, rect.topInset + 40, state.coins);
+  }
+
+  function drawAddBallCollectAnimations(context, state, rect) {
+    if (!effectsEnabled || !addBallCollectAnimations.length) {
+      addBallCollectAnimations = [];
+      return;
+    }
+
+    const now = Date.now();
+    const scaleX = rect.width / GAME_CONFIG.width;
+    const scaleY = rect.height / GAME_CONFIG.height;
+    const target = {
+      x: rect.x + state.launcherX * scaleX,
+      y: rect.y + state.arena.launcherY * scaleY
+    };
+    addBallCollectAnimations = addBallCollectAnimations.filter((animation) => now - animation.startedAt < animation.duration);
+    if (!addBallCollectAnimations.length) {
+      return;
+    }
+
+    for (const animation of addBallCollectAnimations) {
+      const elapsed = now - animation.startedAt;
+      const progress = clamp(elapsed / animation.duration, 0, 1);
+      const flight = clamp(elapsed / 650, 0, 1);
+
+      if (elapsed < 170) {
+        const pulse = Math.sin((elapsed / 170) * Math.PI);
+        context.save();
+        context.beginPath();
+        context.arc(animation.sourceX, animation.sourceY, 18 + pulse * 14, 0, Math.PI * 2);
+        context.strokeStyle = `rgba(255,207,140,${0.35 + pulse * 0.42})`;
+        context.lineWidth = 2 + pulse * 2;
+        context.stroke();
+        context.restore();
+      }
+
+      if (flight > 0 && flight < 1) {
+        const eased = easeOutCubic(flight);
+        const arcLift = Math.sin(flight * Math.PI) * 54;
+        const x = lerp(animation.sourceX, target.x, eased);
+        const y = lerp(animation.sourceY, target.y, eased) - arcLift;
+        const radius = lerp(18, 12, eased);
+        const alpha = 1 - Math.max(0, flight - 0.84) / 0.16;
+
+        context.save();
+        context.globalAlpha = alpha;
+        for (let trail = 1; trail <= 3; trail += 1) {
+          const tailFlight = clamp(flight - trail * 0.045, 0, 1);
+          const tailEase = easeOutCubic(tailFlight);
+          const tailX = lerp(animation.sourceX, target.x, tailEase);
+          const tailY = lerp(animation.sourceY, target.y, tailEase) - Math.sin(tailFlight * Math.PI) * 54;
+          context.beginPath();
+          context.arc(tailX, tailY, Math.max(2, radius * (0.3 - trail * 0.045)), 0, Math.PI * 2);
+          context.fillStyle = `rgba(255,207,140,${0.28 / trail})`;
+          context.fill();
+        }
+        drawDemoAddBall(context, x, y, radius);
+        context.restore();
+      }
+
+      if (progress > 0.72) {
+        const arrive = clamp((progress - 0.72) / 0.28, 0, 1);
+        const glow = Math.sin(arrive * Math.PI);
+        context.save();
+        context.beginPath();
+        context.arc(target.x, target.y, 24 + glow * 16, 0, Math.PI * 2);
+        context.strokeStyle = `rgba(255,207,140,${0.18 + glow * 0.42})`;
+        context.lineWidth = 2 + glow * 2;
+        context.stroke();
+        context.restore();
+      }
+    }
+  }
+
   function drawItemCountBadge(context, button, count, accentColor) {
     const badgeWidth = clamp(button.width * 0.48, 34, 52);
     const badgeHeight = clamp(button.height * 0.27, 22, 30);
@@ -4181,7 +4558,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       context.stroke();
     }
 
-    drawItemCountBadge(context, button, count, "#ef4444");
+    drawItemCountBadge(context, button, count, "#38bdf8");
     if (bombPlacementArmed && bombToolMessage) {
       const tray = itemTrayRect(rect);
       context.fillStyle = "#fca5a5";
@@ -4258,7 +4635,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       context.fill();
     }
     context.globalAlpha = 1;
-    drawItemCountBadge(context, button, count, "#ff4b20");
+    drawItemCountBadge(context, button, count, "#38bdf8");
     context.restore();
   }
 
@@ -5623,21 +6000,21 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       context.fillRect(0, 0, screenWidth, screenHeight);
       drawColoredTitle(context, screenWidth / 2, rect.y + 138);
       drawMenuStats(context, rect);
-      drawGearButton(context, currentButtons().find((button) => button.id === "menu-settings"));
+      const menuButtons = currentButtons();
       drawTopRightResourceCounters(context, rect, state);
-      drawDailyRewardsButton(context, currentButtons().find((button) => button.id === "daily-rewards"));
+      drawDailyRewardsButton(context, menuButtons.find((button) => button.id === "daily-rewards"));
       if (!overlay) {
         const progressLevel = unfinishedProgressLevel();
         drawButton(
           context,
-          currentButtons().find((button) => button.id === "continue-challenge"),
+          menuButtons.find((button) => button.id === "continue-challenge"),
           texts.continueChallenge,
           false,
           progressLevel ? `${texts.unfinishedProgress}：${texts.levelValue(progressLevel)}` : null
         );
-        drawButton(context, currentButtons().find((button) => button.id === "play"), texts.play, true);
-        drawButton(context, currentButtons().find((button) => button.id === "shop"), texts.shop, false);
-        drawButton(context, currentButtons().find((button) => button.id === "leaderboard"), texts.leaderboard, false);
+        drawButton(context, menuButtons.find((button) => button.id === "play"), texts.play, true);
+        drawHomeBottomNav(context, menuButtons);
+        drawFeedbackWarning(context);
       }
       drawCoinDoubleAnimation(context, state, rect);
       if (overlay === "shop") {
@@ -5666,6 +6043,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       context.font = gameHudFont(42, 700);
       context.fillText(String(state.round), screenWidth / 2, rect.topInset + 54);
       drawTopRightResourceCounters(context, rect, state);
+      drawCoinCollectAnimations(context, state, rect);
+      drawAddBallCollectAnimations(context, state, rect);
 
       const pauseButton = currentButtons().find((button) => button.id === "pause");
       if (pauseButton && state.state !== "gameover") {
@@ -5880,12 +6259,14 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       const settings = settingsLayout(panel);
       const soundToggleButton = currentButtons().find((button) => button.id === "toggle-sound");
       const vibrationToggleButton = currentButtons().find((button) => button.id === "toggle-vibration");
+      const effectsToggleButton = currentButtons().find((button) => button.id === "toggle-effects");
       context.fillStyle = "rgba(255,255,255,0.72)";
       context.font = "22px sans-serif";
       context.textAlign = "left";
       context.textBaseline = "middle";
       context.fillText(texts.soundLabel, settings.labelX, soundToggleButton.y + soundToggleButton.height / 2);
       context.fillText(texts.vibrationLabel, settings.labelX, vibrationToggleButton.y + vibrationToggleButton.height / 2);
+      context.fillText(texts.effectsLabel, settings.labelX, effectsToggleButton.y + effectsToggleButton.height / 2);
     }
 
     if (overlay === "gameover") {
@@ -5958,8 +6339,16 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         "daily-checkin-ok": pendingCheckIn?.reward ? texts.claim : texts.done
       };
 
-      if (button.id === "toggle-sound" || button.id === "toggle-vibration") {
-        drawToggle(context, button, button.id === "toggle-sound" ? audioBus.isEnabled() : vibrationEnabled);
+      if (button.id === "toggle-sound" || button.id === "toggle-vibration" || button.id === "toggle-effects") {
+        drawToggle(
+          context,
+          button,
+          button.id === "toggle-sound"
+            ? audioBus.isEnabled()
+            : button.id === "toggle-vibration"
+              ? vibrationEnabled
+              : effectsEnabled
+        );
         continue;
       }
 
@@ -6241,7 +6630,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     leaderboardDragging = false;
   });
   wxApi.onHide?.(() => {
-    persistProgress(true);
+    hideFeedbackNativeButton();
+    if (screen === "game" && game.getState().state !== "gameover") {
+      persistProgress(true);
+    }
   });
   wxApi.onShow?.(() => {
     if (completePendingDoubleCoinShare()) {
@@ -6364,6 +6756,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     if (screen === "game" && overlay !== "gameover") {
       persistProgress();
     }
+    syncFeedbackNativeButton();
     if (screen === "game") {
       const rect = canvasRect();
       renderer.render(

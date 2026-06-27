@@ -24,6 +24,11 @@ const translations = {
     soundOff: "音效关",
     toggleSoundOn: "关闭音效",
     toggleSoundOff: "开启音效",
+    effectsLabel: "特效",
+    effectsOn: "特效开",
+    effectsOff: "特效关",
+    toggleEffectsOn: "关闭特效",
+    toggleEffectsOff: "开启特效",
     language: "语言",
     languageValueZh: "简体中文",
     languageValueEn: "English",
@@ -50,6 +55,11 @@ const translations = {
     soundOff: "Sound Off",
     toggleSoundOn: "Turn Sound Off",
     toggleSoundOff: "Turn Sound On",
+    effectsLabel: "Effects",
+    effectsOn: "Effects On",
+    effectsOff: "Effects Off",
+    toggleEffectsOn: "Turn Effects Off",
+    toggleEffectsOff: "Turn Effects On",
     language: "Language",
     languageValueZh: "简体中文",
     languageValueEn: "English",
@@ -102,11 +112,13 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   const settings = storage.loadSettings();
   const audioBus = createAudioBus();
   audioBus.setEnabled(settings.soundEnabled);
+  let effectsEnabled = settings.effectsEnabled !== false;
   let currentLanguage = settings.language || "zh-CN";
 
   const boardGenerator = createBoardGenerator(GAME_CONFIG);
   const game = createGameController({
     config: GAME_CONFIG,
+    effectsEnabled,
     boardGenerator,
     audioBus
   });
@@ -132,6 +144,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   function saveSettings() {
     storage.saveSettings({
       soundEnabled: audioBus.isEnabled(),
+      effectsEnabled,
       language: currentLanguage
     });
   }
@@ -242,9 +255,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     if (overlay === "settings") {
       buttons.push(
-        { id: "toggle-sound", x: rect.x + 36, y: rect.y + rect.height * 0.38, width: rect.width - 72, height: 52 },
-        { id: "toggle-language", x: rect.x + 36, y: rect.y + rect.height * 0.50, width: rect.width - 72, height: 52 },
-        { id: "settings-done", x: rect.x + 36, y: rect.y + rect.height * 0.62, width: rect.width - 72, height: 52 }
+        { id: "toggle-sound", x: rect.x + 36, y: rect.y + rect.height * 0.34, width: rect.width - 72, height: 52 },
+        { id: "toggle-effects", x: rect.x + 36, y: rect.y + rect.height * 0.46, width: rect.width - 72, height: 52 },
+        { id: "toggle-language", x: rect.x + 36, y: rect.y + rect.height * 0.58, width: rect.width - 72, height: 52 },
+        { id: "settings-done", x: rect.x + 36, y: rect.y + rect.height * 0.70, width: rect.width - 72, height: 52 }
       );
     }
 
@@ -282,6 +296,11 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         break;
       case "toggle-sound":
         audioBus.setEnabled(!audioBus.isEnabled());
+        saveSettings();
+        break;
+      case "toggle-effects":
+        effectsEnabled = !effectsEnabled;
+        game.setEffectsEnabled(effectsEnabled);
         saveSettings();
         break;
       case "toggle-language":
@@ -402,9 +421,14 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         panel.y + 110
       );
       context.fillText(
-        `${t("language")}: ${currentLanguage === "zh-CN" ? t("languageValueZh") : t("languageValueEn")}`,
+        `${t("effectsLabel")}: ${effectsEnabled ? t("effectsOn") : t("effectsOff")}`,
         screenWidth / 2,
         panel.y + 146
+      );
+      context.fillText(
+        `${t("language")}: ${currentLanguage === "zh-CN" ? t("languageValueZh") : t("languageValueEn")}`,
+        screenWidth / 2,
+        panel.y + 182
       );
     }
 
@@ -424,6 +448,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         settings: t("settings"),
         menu: t("mainMenu"),
         "toggle-sound": audioBus.isEnabled() ? t("toggleSoundOn") : t("toggleSoundOff"),
+        "toggle-effects": effectsEnabled ? t("toggleEffectsOn") : t("toggleEffectsOff"),
         "toggle-language": t("switchLanguage"),
         "settings-done": t("done"),
         restart: t("restart")

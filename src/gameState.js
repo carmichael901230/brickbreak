@@ -96,6 +96,42 @@ function normalizeSkins(skins, config = GAME_CONFIG) {
   };
 }
 
+function parseHexColor(color) {
+  const normalized = color?.replace("#", "");
+  if (!normalized || !/^[\da-f]{6}$/i.test(normalized)) {
+    return null;
+  }
+
+  return {
+    r: Number.parseInt(normalized.slice(0, 2), 16),
+    g: Number.parseInt(normalized.slice(2, 4), 16),
+    b: Number.parseInt(normalized.slice(4, 6), 16)
+  };
+}
+
+function rgbaFromHex(color, alpha = 1) {
+  const rgb = parseHexColor(color);
+  if (!rgb) {
+    return color;
+  }
+
+  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
+}
+
+function darkenSkinColor(color, lifeRatio) {
+  const rgb = parseHexColor(color);
+  if (!rgb) {
+    return color;
+  }
+
+  const shade = 0.36 + Math.max(0, Math.min(1, lifeRatio)) * 0.64;
+  return `rgba(${Math.round(rgb.r * shade)}, ${Math.round(rgb.g * shade)}, ${Math.round(rgb.b * shade)}, 0.92)`;
+}
+
+function mixChannel(start, end, progress) {
+  return Math.round(start + (end - start) * progress);
+}
+
 function restoreNumber(value, fallback) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
@@ -167,10 +203,12 @@ export function createGameController({
   initialCoins = 0,
   initialHearts = 0,
   initialSkins = null,
+  effectsEnabled = true,
   boardGenerator,
   audioBus
 }) {
   let gameState = createInitialGameState(config, initialCoins, initialSkins, initialHearts);
+  let visualEffectsEnabled = effectsEnabled !== false;
 
   function resolveAimPreview(point) {
     const dragVector = {
@@ -484,6 +522,10 @@ export function createGameController({
   }
 
   function addParticle(x, y, tone) {
+    if (!visualEffectsEnabled) {
+      return;
+    }
+
     gameState.particles.push({
       x,
       y,
@@ -495,28 +537,106 @@ export function createGameController({
     });
   }
 
+  function blockBreakPalette(block) {
+    const lifeRatio = Math.max(0, Math.min(1, (block?.hp ?? 1) / Math.max(1, block?.maxHp ?? block?.hp ?? 1)));
+    const brickSkin = config.skins?.brick?.find((skin) => skin.id === gameState.skins?.selected?.brick);
+    if (brickSkin?.color) {
+      const palette = [darkenSkinColor(brickSkin.color, lifeRatio)];
+      if (brickSkin.accent) {
+        palette.push(rgbaFromHex(brickSkin.accent, 0.82));
+      }
+      return palette;
+    }
+
+    return [
+      `rgba(${mixChannel(74, 200, lifeRatio)}, ${mixChannel(102, 224, lifeRatio)}, ${mixChannel(132, 255, lifeRatio)}, 0.92)`,
+      "rgba(238,248,255,0.82)"
+    ];
+  }
+
+  function addBlockBreakParticles(x, y, size, block = null) {
+    if (!visualEffectsEnabled) {
+      return;
+    }
+
+    const inset = Math.min(config.visualBrickGap / 2, size * 0.18);
+    const visibleX = x + inset;
+    const visibleY = y + inset;
+    const visibleSize = size - inset * 2;
+    const centerX = visibleX + visibleSize / 2;
+    const centerY = visibleY + visibleSize / 2;
+    const shardCount = 18;
+    const palette = blockBreakPalette(block);
+
+    for (let index = 0; index < shardCount; index += 1) {
+      const column = index % 6;
+      const row = Math.floor(index / 6);
+      const shardX = visibleX + (column + 0.5) * (visibleSize / 6);
+      const shardY = visibleY + (row + 0.5) * (visibleSize / 3);
+      const angle = Math.atan2(shardY - centerY, shardX - centerX) + (Math.random() - 0.5) * 0.75;
+      const speed = 95 + Math.random() * 160;
+      const shardSize = Math.max(5, Math.min(13, visibleSize * (0.08 + Math.random() * 0.05)));
+      const color = palette[Math.floor(Math.random() * palette.length)];
+
+      gameState.particles.push({
+        x: shardX,
+        y: shardY,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 60,
+        life: config.effects.particleLife * 1.65,
+        maxLife: config.effects.particleLife * 1.65,
+        tone: "block-break",
+        shape: "shard",
+        color,
+        strokeColor: rgbaFromHex("#ffffff", 0.45),
+        size: shardSize,
+        rotation: Math.random() * Math.PI,
+        rotationSpeed: (Math.random() - 0.5) * 9
+      });
+    }
+  }
+
   function tickParticles(deltaTime) {
+    if (!visualEffectsEnabled) {
+      gameState.particles = [];
+      return;
+    }
+
     for (const particle of gameState.particles) {
       particle.x += particle.vx * deltaTime;
       particle.y += particle.vy * deltaTime;
       particle.vy += 180 * deltaTime;
+      if (Number.isFinite(particle.rotationSpeed)) {
+        particle.rotation = (particle.rotation ?? 0) + particle.rotationSpeed * deltaTime;
+      }
       particle.life -= deltaTime;
     }
 
     gameState.particles = gameState.particles.filter((particle) => particle.life > 0);
   }
 
-  function collectPickup(pickup, ball) {
+  function collectPickup(pickup, ball, centerX, centerY) {
     pickup.collected = true;
     addParticle(ball.x, ball.y, "pickup");
-    audioBus.emit("pickup");
+    audioBus.emit("pickup", { x: centerX, y: centerY });
   }
 
-  function collectCoin(coin, ball) {
+  function collectCoin(coin, ball, centerX, centerY) {
     coin.collected = true;
     gameState.coins += 1;
     addParticle(ball.x, ball.y, "coin");
-    audioBus.emit("coin", { coins: gameState.coins });
+    audioBus.emit("coin", { coins: gameState.coins, x: centerX, y: centerY });
+  }
+
+  function setEffectsEnabled(enabled) {
+    visualEffectsEnabled = enabled !== false;
+    if (!visualEffectsEnabled) {
+      gameState.particles = [];
+    }
+  }
+
+  function areEffectsEnabled() {
+    return visualEffectsEnabled;
   }
 
   function damageBlock(block, position) {
@@ -527,6 +647,7 @@ export function createGameController({
 
     if (block.hp <= 0) {
       addParticle(position.x + gameState.arena.blockSize / 2, position.y + gameState.arena.blockSize / 2, "clear");
+      addBlockBreakParticles(position.x, position.y, gameState.arena.blockSize, block);
       audioBus.emit("clear");
     }
   }
@@ -568,6 +689,7 @@ export function createGameController({
     gameState.blocks = gameState.blocks.filter((block) => !clearedRowSet.has(block.row));
     for (const removed of removedBlocks) {
       addParticle(removed.x + removed.size / 2, removed.y + removed.size / 2, "clear");
+      addBlockBreakParticles(removed.x, removed.y, removed.size, removed.block);
     }
     audioBus.emit("clearRows", {
       rows: clearedRows,
@@ -612,6 +734,7 @@ export function createGameController({
     gameState.blocks = gameState.blocks.filter((block) => !removedIds.has(block.id));
     for (const removed of removedBlocks) {
       addParticle(removed.x + removed.size / 2, removed.y + removed.size / 2, "clear");
+      addBlockBreakParticles(removed.x, removed.y, removed.size, removed.block);
     }
     audioBus.emit("bomb", {
       row,
@@ -707,7 +830,7 @@ export function createGameController({
         const centerX = position.x + gameState.arena.blockSize / 2;
         const centerY = position.y + gameState.arena.blockSize / 2;
         if (Math.hypot(ball.x - centerX, ball.y - centerY) <= config.ballRadius + config.pickupRadius) {
-          collectPickup(pickup, ball);
+          collectPickup(pickup, ball, centerX, centerY);
         }
       }
 
@@ -720,7 +843,7 @@ export function createGameController({
         const centerX = position.x + gameState.arena.blockSize / 2;
         const centerY = position.y + gameState.arena.blockSize / 2;
         if (Math.hypot(ball.x - centerX, ball.y - centerY) <= config.ballRadius + config.coinRadius) {
-          collectCoin(coin, ball);
+          collectCoin(coin, ball, centerX, centerY);
         }
       }
 
@@ -895,12 +1018,14 @@ export function createGameController({
     importSnapshot,
     grantRewards,
     restart,
+    setEffectsEnabled,
     setSkins,
     spendCoins,
     startAim,
     updateAim,
     releaseAim,
     update,
+    areEffectsEnabled,
     getState,
     getEntityPosition: (entity) => getEntityPosition(gameState.arena, config, entity)
   };

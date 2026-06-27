@@ -604,9 +604,24 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
 
   function drawParticles(state) {
     for (const particle of state.particles) {
+      const alpha = particle.life / particle.maxLife;
+      if (particle.shape === "shard") {
+        const size = particle.size ?? 8;
+        context.save();
+        context.translate(particle.x, particle.y);
+        context.rotate(particle.rotation ?? 0);
+        context.globalAlpha = alpha;
+        context.fillStyle = particle.color ?? "#a8efff";
+        context.fillRect(-size / 2, -size / 2, size, size);
+        context.strokeStyle = particle.strokeColor ?? "rgba(255,255,255,0.45)";
+        context.lineWidth = 1;
+        context.strokeRect(-size / 2, -size / 2, size, size);
+        context.restore();
+        continue;
+      }
+
       context.beginPath();
       context.arc(particle.x, particle.y, 3, 0, Math.PI * 2);
-      const alpha = particle.life / particle.maxLife;
       context.fillStyle = particle.tone === "heart"
         ? alphaColor("#ff6f8e", alpha)
         : particle.tone === "pickup" || particle.tone === "coin"
