@@ -2127,6 +2127,22 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     return finalState.heartCount > 0 ? "heart-continue" : "gameover";
   }
 
+  function hasHeartReviveAvailable() {
+    return game.getState().heartCount > 0;
+  }
+
+  function gameOverPanelMetrics() {
+    if (continueUsedThisRun) {
+      return { yScale: 0.1, heightScale: 0.78 };
+    }
+
+    if (hasHeartReviveAvailable()) {
+      return { yScale: 0.16, heightScale: 0.66 };
+    }
+
+    return { yScale: 0.24, heightScale: 0.54 };
+  }
+
   function useHeartToContinue() {
     if (!game.consumeHeartContinue()) {
       return;
@@ -2342,8 +2358,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   function currentButtons() {
     const rect = canvasRect();
     const layout = shopLayout();
-    const gameOverPanelYScale = continueUsedThisRun ? 0.1 : 0.24;
-    const gameOverPanelHeightScale = continueUsedThisRun ? 0.78 : 0.54;
+    const gameOverPanelLayout = gameOverPanelMetrics();
     const confirmNewRunPanel = {
       x: rect.x + 24,
       y: rect.y + rect.height * 0.16,
@@ -2352,9 +2367,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     };
     const gameOverPanel = {
       x: rect.x + 24,
-      y: rect.y + rect.height * gameOverPanelYScale,
+      y: rect.y + rect.height * gameOverPanelLayout.yScale,
       width: rect.width - 48,
-      height: rect.height * gameOverPanelHeightScale
+      height: rect.height * gameOverPanelLayout.heightScale
     };
     const heartPanel = heartContinuePanelRect(rect);
     const checkInPanel = checkInPanelRect(rect);
@@ -2722,13 +2737,26 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       });
 
       if (!continueUsedThisRun) {
+        const hasHeartRevive = hasHeartReviveAvailable();
+        const bottomPadding = 34;
+        const buttonGap = hasHeartRevive ? 12 : 0;
         buttons.push({
           id: "ad-continue",
           x: gameOverPanel.x + 24,
-          y: gameOverPanel.y + gameOverPanel.height - 76,
+          y: gameOverPanel.y + gameOverPanel.height - bottomPadding - 52 -
+            (hasHeartRevive ? 52 + buttonGap : 0),
           width: gameOverPanel.width - 48,
           height: 52
         });
+        if (hasHeartRevive) {
+          buttons.push({
+            id: "heart-use",
+            x: gameOverPanel.x + 24,
+            y: gameOverPanel.y + gameOverPanel.height - bottomPadding - 52,
+            width: gameOverPanel.width - 48,
+            height: 52
+          });
+        }
       } else {
         const earnedCoins = Math.max(0, Math.floor(gameOverResult?.coinsEarned || 0));
         if (earnedCoins > 0 && gameOverResult?.coinDoubled !== true) {
@@ -6087,20 +6115,21 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     context.fillStyle = "rgba(0,0,0,0.54)";
     context.fillRect(0, 0, screenWidth, screenHeight);
 
-    const gameOverPanelYScale = overlay === "gameover" && continueUsedThisRun ? 0.1 : 0.24;
-    const gameOverPanelHeightScale = overlay === "gameover" && continueUsedThisRun ? 0.78 : 0.54;
+    const gameOverPanelLayout = overlay === "gameover"
+      ? gameOverPanelMetrics()
+      : { yScale: 0.24, heightScale: 0.54 };
     const panelYScale = overlay === "daily-checkin"
       ? 0.04
       : overlay === "confirm-new-run" || overlay === "pause"
         ? 0.16
         : overlay === "heart-continue"
           ? HEART_CONTINUE_PANEL_Y_SCALE
-          : gameOverPanelYScale;
+          : gameOverPanelLayout.yScale;
     const panelHeightScale = overlay === "daily-checkin"
       ? 0.9
       : overlay === "confirm-new-run" || overlay === "pause"
         ? 0.68
-        : gameOverPanelHeightScale;
+        : gameOverPanelLayout.heightScale;
     const panelSideInset = overlay === "daily-checkin" || overlay === "leaderboard" ? 18 : 24;
     const panel = overlay === "daily-checkin"
       ? checkInPanelRect(rect)
@@ -6272,12 +6301,15 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     if (overlay === "gameover") {
       if (!continueUsedThisRun) {
+        const hasHeartRevive = hasHeartReviveAvailable();
         const shareContinueButton = currentButtons().find((button) => button.id === "ad-continue");
-        const lineTop = panel.y + 120;
+        const lineTop = panel.y + (hasHeartRevive ? 92 : 120);
         const lineBottom = shareContinueButton ? shareContinueButton.y - 14 : panel.y + panel.height - 96;
-        const lineGap = Math.max(24, Math.min(34, (lineBottom - lineTop) / 2));
+        const lineGap = hasHeartRevive
+          ? clamp((lineBottom - lineTop) / 2, 22, 28)
+          : Math.max(24, Math.min(34, (lineBottom - lineTop) / 2));
         context.fillStyle = "rgba(255,255,255,0.82)";
-        context.font = "17px sans-serif";
+        context.font = `${hasHeartRevive ? 16 : 17}px sans-serif`;
         context.fillText(texts.shareContinueHintTwo, screenWidth / 2, lineTop);
         context.fillText(texts.shareContinueHintThree, screenWidth / 2, lineTop + lineGap);
         if (doubleCoinMessage) {
