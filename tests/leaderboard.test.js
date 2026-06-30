@@ -33,7 +33,7 @@ test("current user is summarized separately when outside top 10", () => {
 });
 
 test("current user can appear inside top 10", () => {
-  const board = createLeaderboard({ currentBestLevel: 1150, boardType: "total" });
+  const board = createLeaderboard({ currentBestLevel: 1900, boardType: "total" });
 
   assert.equal(board.topRows.some((row) => row.isCurrentUser), true);
   assert.equal(board.currentUser.rankLabel, "8");
@@ -49,7 +49,7 @@ test("province board only uses Guangdong fake records", () => {
   assert.notDeepEqual(total.topRows.map((row) => row.id), province.topRows.map((row) => row.id));
 });
 
-test("national fake records are in the 1000 to 900 range at the top", () => {
+test("national fake records stay elevated at the top", () => {
   const board = createLeaderboard({ currentBestLevel: 1, boardType: "total" });
 
   assert.ok(board.topRows[0].bestLevel >= 1100);

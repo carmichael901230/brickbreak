@@ -391,7 +391,7 @@ test("leaderboard masks fake WeChat names", () => {
 
 test("leaderboard estimates current user position", () => {
   const lowBoard = createLeaderboard({ currentBestLevel: 1, boardType: "total" });
-  const highBoard = createLeaderboard({ currentBestLevel: 1090, boardType: "province" });
+  const highBoard = createLeaderboard({ currentBestLevel: 1500, boardType: "province" });
 
   assert.equal(lowBoard.currentUser.isCurrentUser, true);
   assert.equal(lowBoard.currentUser.rankLabel, "999+");

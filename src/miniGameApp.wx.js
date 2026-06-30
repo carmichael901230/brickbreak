@@ -17,7 +17,7 @@ const texts = {
   startNew: "开始新游戏",
   shop: "商店",
   brickSkins: "砖块",
-  ballSkins: "小球",
+  ballSkins: "弹球",
   buy: "购买",
   selected: "已选择",
   use: "使用",
