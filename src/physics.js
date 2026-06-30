@@ -20,18 +20,31 @@ export function clampLaunchDirection(vector, config = GAME_CONFIG) {
 }
 
 export function reflectBall(ball, arena, config = GAME_CONFIG) {
+  const hit = {
+    left: false,
+    right: false,
+    ceiling: false,
+    any: false
+  };
+
   if (ball.x <= config.ballRadius && ball.vx < 0) {
     ball.x = config.ballRadius;
     ball.vx *= -1;
+    hit.left = true;
   } else if (ball.x >= arena.width - config.ballRadius && ball.vx > 0) {
     ball.x = arena.width - config.ballRadius;
     ball.vx *= -1;
+    hit.right = true;
   }
 
   if (ball.y <= config.ballRadius && ball.vy < 0) {
     ball.y = config.ballRadius;
     ball.vy *= -1;
+    hit.ceiling = true;
   }
+
+  hit.any = hit.left || hit.right || hit.ceiling;
+  return hit;
 }
 
 function visibleBrickRect(blockRect, config) {

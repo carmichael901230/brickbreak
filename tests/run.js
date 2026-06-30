@@ -63,9 +63,10 @@ test("clampLaunchDirection prevents near-horizontal down shots", () => {
 
 test("reflectBall bounces off arena walls and ceiling", () => {
   const ball = { x: 6, y: 6, vx: -120, vy: -240 };
-  reflectBall(ball, { width: 720, height: 960 });
+  const hit = reflectBall(ball, { width: 720, height: 960 });
   assert.equal(ball.vx, 120);
   assert.equal(ball.vy, 240);
+  assert.deepEqual(hit, { left: true, right: false, ceiling: true, any: true });
 });
 
 test("resolveBallBlockCollision flips velocity when a block is hit", () => {
@@ -1081,6 +1082,137 @@ test("speed up becomes available again after its cooldown", () => {
   assert.equal(game.activateSpeedUp(), true);
   assert.equal(game.getState().balls[0].vx, beforeSecondSpeedUp * customConfig.speedUpMultiplier);
   assert.equal(game.getState().speedMultiplier, customConfig.speedUpMultiplier * customConfig.speedUpMultiplier);
+});
+
+test("long volleys strengthen weak bounces from block tops", () => {
+  const customConfig = {
+    ...GAME_CONFIG,
+    width: 80,
+    height: 240,
+    columns: 1,
+    topPadding: 80,
+    bottomPadding: 40,
+    ballRadius: 6,
+    ballSpeed: 100,
+    visualBrickGap: 8,
+    trapEscapeDelay: 25,
+    trapWeakVerticalRatio: 0.1,
+    trapEscapeVerticalRatio: 0.2,
+    settleThreshold: 230
+  };
+  const game = createGameController({
+    config: customConfig,
+    boardGenerator: createRoundSequence([
+      { blocks: [], pickups: [] },
+      { blocks: [], pickups: [] }
+    ]),
+    audioBus: createSilentAudioBus()
+  });
+  const state = game.getState();
+  const visibleTop = customConfig.topPadding + customConfig.visualBrickGap / 2;
+  state.state = "resolving";
+  state.volleyElapsed = 25;
+  state.blocks = [{ id: "roof", row: 0, column: 0, hp: 3, maxHp: 3 }];
+  state.balls = [{
+    x: customConfig.width / 2,
+    y: visibleTop - customConfig.ballRadius,
+    vx: 99.87492177719089,
+    vy: 5,
+    active: true,
+    returned: false
+  }];
+
+  game.update(0.001);
+
+  assertClose(state.balls[0].vy, -20);
+  assertClose(Math.hypot(state.balls[0].vx, state.balls[0].vy), 100);
+});
+
+test("early volleys keep normal weak bounces from block tops", () => {
+  const customConfig = {
+    ...GAME_CONFIG,
+    width: 80,
+    height: 240,
+    columns: 1,
+    topPadding: 80,
+    bottomPadding: 40,
+    ballRadius: 6,
+    ballSpeed: 100,
+    visualBrickGap: 8,
+    trapEscapeDelay: 25,
+    trapWeakVerticalRatio: 0.1,
+    trapEscapeVerticalRatio: 0.2,
+    settleThreshold: 230
+  };
+  const game = createGameController({
+    config: customConfig,
+    boardGenerator: createRoundSequence([
+      { blocks: [], pickups: [] },
+      { blocks: [], pickups: [] }
+    ]),
+    audioBus: createSilentAudioBus()
+  });
+  const state = game.getState();
+  const visibleTop = customConfig.topPadding + customConfig.visualBrickGap / 2;
+  state.state = "resolving";
+  state.volleyElapsed = 10;
+  state.blocks = [{ id: "roof", row: 0, column: 0, hp: 3, maxHp: 3 }];
+  state.balls = [{
+    x: customConfig.width / 2,
+    y: visibleTop - customConfig.ballRadius,
+    vx: 99.87492177719089,
+    vy: 5,
+    active: true,
+    returned: false
+  }];
+
+  game.update(0.001);
+
+  assertClose(state.balls[0].vy, -5);
+  assertClose(Math.hypot(state.balls[0].vx, state.balls[0].vy), 100);
+});
+
+test("long volleys strengthen weak vertical speed after wall bounces", () => {
+  const customConfig = {
+    ...GAME_CONFIG,
+    width: 80,
+    height: 240,
+    columns: 1,
+    topPadding: 80,
+    bottomPadding: 40,
+    ballRadius: 6,
+    ballSpeed: 100,
+    trapEscapeDelay: 25,
+    trapWeakVerticalRatio: 0.1,
+    trapEscapeVerticalRatio: 0.2,
+    settleThreshold: 230
+  };
+  const game = createGameController({
+    config: customConfig,
+    boardGenerator: createRoundSequence([
+      { blocks: [], pickups: [] },
+      { blocks: [], pickups: [] }
+    ]),
+    audioBus: createSilentAudioBus()
+  });
+  const state = game.getState();
+  state.state = "resolving";
+  state.volleyElapsed = 25;
+  state.blocks = [];
+  state.balls = [{
+    x: customConfig.width - customConfig.ballRadius,
+    y: 120,
+    vx: 99.87492177719089,
+    vy: 5,
+    active: true,
+    returned: false
+  }];
+
+  game.update(0.001);
+
+  assertClose(state.balls[0].vy, 20);
+  assert.ok(state.balls[0].vx < 0);
+  assertClose(Math.hypot(state.balls[0].vx, state.balls[0].vy), 100);
 });
 
 test("speed up increases queued ball launch frequency", () => {

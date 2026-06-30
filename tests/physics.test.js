@@ -16,9 +16,10 @@ test("clampLaunchDirection prevents near-horizontal down shots", () => {
 
 test("reflectBall bounces off arena walls and ceiling", () => {
   const ball = { x: 6, y: 6, vx: -120, vy: -240 };
-  reflectBall(ball, { width: 720, height: 960 });
+  const hit = reflectBall(ball, { width: 720, height: 960 });
   assert.equal(ball.vx, 120);
   assert.equal(ball.vy, 240);
+  assert.deepEqual(hit, { left: true, right: false, ceiling: true, any: true });
 });
 
 test("resolveBallBlockCollision flips velocity when a block is hit", () => {

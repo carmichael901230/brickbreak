@@ -66,6 +66,20 @@ function createBall(launcherX, launcherY) {
   };
 }
 
+function applyTrapEscape(ball, config) {
+  const speed = Math.hypot(ball.vx, ball.vy);
+  if (speed <= 0 || Math.abs(ball.vy) >= speed * config.trapWeakVerticalRatio) {
+    return;
+  }
+
+  const escapeVy = speed * config.trapEscapeVerticalRatio;
+  const horizontalSpeed = Math.sqrt(Math.max(0, speed * speed - escapeVy * escapeVy));
+  const horizontalSign = ball.vx < 0 ? -1 : 1;
+  const verticalSign = ball.vy < 0 ? -1 : 1;
+  ball.vx = horizontalSpeed * horizontalSign;
+  ball.vy = escapeVy * verticalSign;
+}
+
 function cloneSerializable(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -784,7 +798,10 @@ export function createGameController({
     for (let step = 0; step < substeps; step += 1) {
       ball.x += ball.vx * stepTime;
       ball.y += ball.vy * stepTime;
-      reflectBall(ball, gameState.arena, config);
+      const wallHit = reflectBall(ball, gameState.arena, config);
+      if (wallHit.any && gameState.volleyElapsed >= config.trapEscapeDelay) {
+        applyTrapEscape(ball, config);
+      }
 
       let collided = false;
       const liveBlockCells = new Set(
@@ -812,6 +829,9 @@ export function createGameController({
         );
 
         if (hit) {
+          if (gameState.volleyElapsed >= config.trapEscapeDelay) {
+            applyTrapEscape(ball, config);
+          }
           damageBlock(block, position);
           if (block.hp <= 0) {
             removeBlock(block.id);
