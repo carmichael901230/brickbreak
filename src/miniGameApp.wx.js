@@ -161,23 +161,23 @@ function settingsPanelRect(rect) {
   const panelSideInset = 24;
   return {
     x: rect.x + panelSideInset,
-    y: rect.y + rect.height * 0.12,
+    y: rect.y + rect.height * 0.1,
     width: rect.width - panelSideInset * 2,
-    height: rect.height * 0.64
+    height: rect.height * 0.72
   };
 }
 
 function settingsLayout(panel) {
   const horizontalInset = clamp(panel.width * 0.11, 28, 36);
-  const buttonHeight = clamp(panel.height * 0.11, 40, 48);
-  const doneHeight = clamp(panel.height * 0.12, 44, 52);
+  const buttonHeight = clamp(panel.height * 0.095, 38, 46);
+  const doneHeight = clamp(panel.height * 0.105, 42, 50);
   const doneY = panel.y + panel.height - horizontalInset - doneHeight;
-  const contentTop = panel.y + clamp(panel.height * 0.2, 64, 88);
+  const contentTop = panel.y + clamp(panel.height * 0.17, 58, 82);
   const contentBottom = doneY - clamp(panel.height * 0.045, 12, 20);
-  const rowCount = 3;
-  const minimumRowGap = 12;
+  const rowCount = 4;
+  const minimumRowGap = 8;
   const availableHeight = Math.max(buttonHeight * rowCount + minimumRowGap * (rowCount - 1), contentBottom - contentTop);
-  const rowGap = clamp((availableHeight - buttonHeight * rowCount) / (rowCount - 1), minimumRowGap, 24);
+  const rowGap = clamp((availableHeight - buttonHeight * rowCount) / (rowCount - 1), minimumRowGap, 20);
   const rowsHeight = buttonHeight * rowCount + rowGap * (rowCount - 1);
   const firstRowY = contentTop + Math.max(0, (availableHeight - rowsHeight) / 2);
   const toggleWidth = clamp(panel.width * 0.32, 96, 106);
@@ -188,8 +188,9 @@ function settingsLayout(panel) {
     toggleWidth,
     buttonHeight,
     soundY: firstRowY,
-    vibrationY: firstRowY + buttonHeight + rowGap,
-    effectsY: firstRowY + (buttonHeight + rowGap) * 2,
+    musicY: firstRowY + buttonHeight + rowGap,
+    vibrationY: firstRowY + (buttonHeight + rowGap) * 2,
+    effectsY: firstRowY + (buttonHeight + rowGap) * 3,
     doneX: panel.x + horizontalInset,
     doneY,
     doneWidth: panel.width - horizontalInset * 2,
@@ -347,6 +348,52 @@ function createSoundPlayer(wxApi, src, { poolSize = 1, volume = 0.4, cooldownMs 
   };
 }
 
+function createBackgroundMusicPlayer(wxApi, src, { volume = 0.34 } = {}) {
+  if (!wxApi.createInnerAudioContext) {
+    return {
+      destroy() {},
+      pause() {},
+      play() {},
+      stop() {}
+    };
+  }
+
+  const audio = wxApi.createInnerAudioContext();
+  audio.src = src;
+  audio.loop = true;
+  audio.autoplay = false;
+  audio.volume = volume;
+  let playing = false;
+
+  return {
+    destroy() {
+      audio.destroy?.();
+    },
+
+    pause() {
+      playing = false;
+      audio.pause?.();
+    },
+
+    play() {
+      if (playing) {
+        return;
+      }
+      playing = true;
+      try {
+        audio.play();
+      } catch {
+        playing = false;
+      }
+    },
+
+    stop() {
+      playing = false;
+      audio.stop?.();
+    }
+  };
+}
+
 function createSharePayload(source = "menu-share") {
   return {
     title: "弹球突围 - 一起来挑战更高回合",
@@ -383,6 +430,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   const settings = storage.loadSettings();
   const audioBus = createAudioBus();
   audioBus.setEnabled(settings.soundEnabled);
+  let musicEnabled = settings.musicEnabled !== false;
   let vibrationEnabled = settings.vibrationEnabled !== false;
   let effectsEnabled = settings.effectsEnabled !== false;
   const tutorialAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/tap.png");
@@ -453,6 +501,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   });
   const bombSoundPlayer = createSoundPlayer(wxApi, "src/assets/sound/boom.mp3", {
     volume: 0.78
+  });
+  const backgroundMusicPlayer = createBackgroundMusicPlayer(wxApi, "src/assets/sound/backgound_music.mp3", {
+    volume: 0.32
   });
   const rewardedVideoAd = wxApi.createRewardedVideoAd?.({
     adUnitId: REWARDED_AD_UNIT_ID
@@ -652,10 +703,19 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   function saveSettings() {
     storage.saveSettings({
       soundEnabled: audioBus.isEnabled(),
+      musicEnabled,
       vibrationEnabled,
       effectsEnabled,
       language: "zh-CN"
     });
+  }
+
+  function syncBackgroundMusic() {
+    if (musicEnabled) {
+      backgroundMusicPlayer.play();
+    } else {
+      backgroundMusicPlayer.stop();
+    }
   }
 
   function setEffectsEnabled(enabled) {
@@ -2487,6 +2547,13 @@ export function bootMiniGame(wxApi = globalThis.wx) {
             height: settings.buttonHeight
           },
           {
+            id: "toggle-music",
+            x: settings.toggleX,
+            y: settings.musicY,
+            width: settings.toggleWidth,
+            height: settings.buttonHeight
+          },
+          {
             id: "toggle-vibration",
             x: settings.toggleX,
             y: settings.vibrationY,
@@ -2626,6 +2693,13 @@ export function bootMiniGame(wxApi = globalThis.wx) {
           id: "toggle-sound",
           x: settings.toggleX,
           y: settings.soundY,
+          width: settings.toggleWidth,
+          height: settings.buttonHeight
+        },
+        {
+          id: "toggle-music",
+          x: settings.toggleX,
+          y: settings.musicY,
           width: settings.toggleWidth,
           height: settings.buttonHeight
         },
@@ -2937,6 +3011,11 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         break;
       case "toggle-sound":
         audioBus.setEnabled(!audioBus.isEnabled());
+        saveSettings();
+        break;
+      case "toggle-music":
+        musicEnabled = !musicEnabled;
+        syncBackgroundMusic();
         saveSettings();
         break;
       case "toggle-vibration":
@@ -6294,6 +6373,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     if (overlay === "settings") {
       const settings = settingsLayout(panel);
       const soundToggleButton = currentButtons().find((button) => button.id === "toggle-sound");
+      const musicToggleButton = currentButtons().find((button) => button.id === "toggle-music");
       const vibrationToggleButton = currentButtons().find((button) => button.id === "toggle-vibration");
       const effectsToggleButton = currentButtons().find((button) => button.id === "toggle-effects");
       context.fillStyle = "rgba(255,255,255,0.72)";
@@ -6301,6 +6381,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       context.textAlign = "left";
       context.textBaseline = "middle";
       context.fillText(texts.soundLabel, settings.labelX, soundToggleButton.y + soundToggleButton.height / 2);
+      context.fillText(texts.musicLabel ?? "BGM", settings.labelX, musicToggleButton.y + musicToggleButton.height / 2);
       context.fillText(texts.vibrationLabel, settings.labelX, vibrationToggleButton.y + vibrationToggleButton.height / 2);
       context.fillText(texts.effectsLabel, settings.labelX, effectsToggleButton.y + effectsToggleButton.height / 2);
     }
@@ -6378,15 +6459,17 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         "daily-checkin-ok": pendingCheckIn?.reward ? texts.claim : texts.done
       };
 
-      if (button.id === "toggle-sound" || button.id === "toggle-vibration" || button.id === "toggle-effects") {
+      if (button.id === "toggle-sound" || button.id === "toggle-music" || button.id === "toggle-vibration" || button.id === "toggle-effects") {
         drawToggle(
           context,
           button,
           button.id === "toggle-sound"
             ? audioBus.isEnabled()
-            : button.id === "toggle-vibration"
-              ? vibrationEnabled
-              : effectsEnabled
+            : button.id === "toggle-music"
+              ? musicEnabled
+              : button.id === "toggle-vibration"
+                ? vibrationEnabled
+                : effectsEnabled
         );
         continue;
       }
@@ -6670,6 +6753,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   });
   wxApi.onHide?.(() => {
     hideFeedbackNativeButton();
+    backgroundMusicPlayer.pause();
     if (screen === "game" && game.getState().state !== "gameover") {
       persistProgress(true);
     }
@@ -6690,6 +6774,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     if (screen === "menu") {
       claimDailyCheckIn();
     }
+    syncBackgroundMusic();
   });
 
   function loop() {
@@ -6817,5 +6902,6 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   claimDailyCheckIn();
+  syncBackgroundMusic();
   loop();
 }

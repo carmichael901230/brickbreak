@@ -25,7 +25,29 @@ test("storage adapter falls back safely on corrupt settings", () => {
   const adapter = createStorageAdapter(storage);
   assert.deepEqual(adapter.loadSettings(), {
     soundEnabled: true,
+    musicEnabled: true,
     vibrationEnabled: true,
+    effectsEnabled: true,
+    language: "zh-CN"
+  });
+});
+
+test("storage adapter preserves omitted settings on partial save", () => {
+  const storage = createMemoryStorage({
+    "arc-cascade-settings": JSON.stringify({
+      soundEnabled: true,
+      musicEnabled: false,
+      vibrationEnabled: false,
+      effectsEnabled: true,
+      language: "zh-CN"
+    })
+  });
+  const adapter = createStorageAdapter(storage);
+  adapter.saveSettings({ soundEnabled: false });
+  assert.deepEqual(adapter.loadSettings(), {
+    soundEnabled: false,
+    musicEnabled: false,
+    vibrationEnabled: false,
     effectsEnabled: true,
     language: "zh-CN"
   });

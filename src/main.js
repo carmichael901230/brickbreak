@@ -25,6 +25,7 @@ const menuHeartCounter = document.querySelector("#menuHeartCounter");
 const menuHeartValue = document.querySelector("#menuHeartValue");
 const statusText = document.querySelector("#statusText");
 const soundToggle = document.querySelector("#soundToggle");
+const musicToggle = document.querySelector("#musicToggle");
 const effectsToggle = document.querySelector("#effectsToggle");
 const speedButton = document.querySelector("#speedButton");
 const pauseOverlay = document.querySelector("#pauseOverlay");
@@ -59,10 +60,29 @@ const settings = storage.loadSettings();
 const audioBus = createAudioBus();
 audioBus.setEnabled(settings.soundEnabled);
 soundToggle.checked = settings.soundEnabled;
+let musicEnabled = settings.musicEnabled !== false;
+musicToggle.checked = musicEnabled;
 let effectsEnabled = settings.effectsEnabled !== false;
 effectsToggle.checked = effectsEnabled;
 const coinSound = typeof Audio === "undefined" ? null : new Audio("./src/assets/sound/coin.mp3");
 const reviveSound = typeof Audio === "undefined" ? null : new Audio("./src/assets/sound/revive.mp3");
+const backgroundMusic = typeof Audio === "undefined" ? null : new Audio("./src/assets/sound/backgound_music.mp3");
+if (backgroundMusic) {
+  backgroundMusic.loop = true;
+  backgroundMusic.volume = 0.32;
+}
+
+function syncBackgroundMusic() {
+  if (!backgroundMusic) {
+    return;
+  }
+  if (musicEnabled) {
+    backgroundMusic.play().catch(() => {});
+  } else {
+    backgroundMusic.pause();
+    backgroundMusic.currentTime = 0;
+  }
+}
 
 audioBus.onEvent((event) => {
   console.debug("Audio hook:", event.type, event.payload);
@@ -510,13 +530,19 @@ pauseButton.addEventListener("click", () => {
 
 soundToggle.addEventListener("change", () => {
   audioBus.setEnabled(soundToggle.checked);
-  storage.saveSettings({ soundEnabled: soundToggle.checked, effectsEnabled });
+  storage.saveSettings({ soundEnabled: soundToggle.checked, musicEnabled, effectsEnabled });
+});
+
+musicToggle.addEventListener("change", () => {
+  musicEnabled = musicToggle.checked;
+  syncBackgroundMusic();
+  storage.saveSettings({ soundEnabled: soundToggle.checked, musicEnabled, effectsEnabled });
 });
 
 effectsToggle.addEventListener("change", () => {
   effectsEnabled = effectsToggle.checked;
   game.setEffectsEnabled(effectsEnabled);
-  storage.saveSettings({ soundEnabled: soundToggle.checked, effectsEnabled });
+  storage.saveSettings({ soundEnabled: soundToggle.checked, musicEnabled, effectsEnabled });
 });
 
 speedButton.addEventListener("click", () => {
@@ -630,4 +656,5 @@ syncScreenState();
 syncHud();
 syncResponsiveLayout();
 claimDailyCheckIn();
+syncBackgroundMusic();
 requestAnimationFrame(frame);

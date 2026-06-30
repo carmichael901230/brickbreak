@@ -2,6 +2,7 @@ import { STORAGE_KEYS } from "./config.js";
 
 const defaultSettings = {
   soundEnabled: true,
+  musicEnabled: true,
   vibrationEnabled: true,
   effectsEnabled: true,
   language: "zh-CN"
@@ -69,7 +70,8 @@ export function createStorageAdapter(storage = globalThis.localStorage) {
         return;
       }
 
-      storage.setItem(STORAGE_KEYS.settings, JSON.stringify({ ...defaultSettings, ...settings }));
+      const currentSettings = safeParse(storage.getItem(STORAGE_KEYS.settings), defaultSettings);
+      storage.setItem(STORAGE_KEYS.settings, JSON.stringify({ ...defaultSettings, ...currentSettings, ...settings }));
     },
 
     loadBestScore() {
