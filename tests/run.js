@@ -7,6 +7,7 @@ import { createGameController } from "../src/gameState.js";
 import { createLeaderboard, maskWeChatName } from "../src/leaderboard.js";
 import { clampLaunchDirection, reflectBall, resolveBallBlockCollision } from "../src/physics.js";
 import { createStorageAdapter } from "../src/storage.js";
+import { createAudioBus as createRealAudioBus } from "../src/audio.js";
 
 const tests = [];
 
@@ -59,6 +60,18 @@ test("clampLaunchDirection prevents near-horizontal down shots", () => {
   const direction = clampLaunchDirection({ x: 1, y: 0.01 });
   assert.ok(direction.y < 0);
   assert.ok(direction.x > 0);
+});
+
+test("audio bus dispatches gameplay events while sound is disabled", () => {
+  const audioBus = createRealAudioBus();
+  const events = [];
+  audioBus.setEnabled(false);
+  audioBus.onEvent((event) => events.push(event));
+
+  audioBus.emit("coin", { coins: 3 });
+
+  assert.deepEqual(events, [{ type: "coin", payload: { coins: 3 } }]);
+  assert.equal(audioBus.isEnabled(), false);
 });
 
 test("reflectBall bounces off arena walls and ceiling", () => {

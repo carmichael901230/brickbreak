@@ -17,10 +17,6 @@ export function createAudioBus() {
     },
 
     emit(type, payload = {}) {
-      if (!soundEnabled) {
-        return;
-      }
-
       for (const listener of listeners) {
         listener({ type, payload });
       }

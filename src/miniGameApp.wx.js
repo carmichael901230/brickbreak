@@ -522,34 +522,40 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     addBallCollectAnimations = addBallCollectAnimations.slice(-8);
   }
 
+  function playSound(player) {
+    if (audioBus.isEnabled()) {
+      player.play();
+    }
+  }
+
   audioBus.onEvent(({ type, payload }) => {
     if (type === "hit") {
-      hitSoundPlayer.play();
+      playSound(hitSoundPlayer);
     }
     if (type === "pickup") {
       startAddBallCollectAnimation(payload);
     }
     if (type === "coin") {
-      coinSoundPlayer.play();
+      playSound(coinSoundPlayer);
       startCoinCollectAnimation(payload);
       if (hasStartedRun) {
         runCoinsEarned += 1;
       }
     }
     if (type === "newRecord") {
-      cheerSoundPlayer.play();
+      playSound(cheerSoundPlayer);
     }
     if (type === "revive") {
-      reviveSoundPlayer.play();
+      playSound(reviveSoundPlayer);
     }
     if (type === "clear") {
       vibrateOnBrickClear();
     }
     if (type === "clearRows") {
-      clearRowsSoundPlayer.play();
+      playSound(clearRowsSoundPlayer);
     }
     if (type === "bomb") {
-      bombSoundPlayer.play();
+      playSound(bombSoundPlayer);
     }
   });
 
@@ -6765,7 +6771,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       game.grantRewards({ coins: amount });
       storage.saveCoins(game.getState().coins);
       lastSavedCoins = game.getState().coins;
-      coinSoundPlayer.play();
+      playSound(coinSoundPlayer);
     }
     if (
       dailyClaimAnimation &&

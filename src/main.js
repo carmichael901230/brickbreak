@@ -66,6 +66,9 @@ const reviveSound = typeof Audio === "undefined" ? null : new Audio("./src/asset
 
 audioBus.onEvent((event) => {
   console.debug("Audio hook:", event.type, event.payload);
+  if (!audioBus.isEnabled()) {
+    return;
+  }
   if (event.type === "coin" && coinSound) {
     coinSound.currentTime = 0;
     coinSound.play().catch(() => {});
