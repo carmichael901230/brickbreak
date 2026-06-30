@@ -155,7 +155,7 @@ function restoreBoolean(value, fallback) {
 }
 
 function getMaxSpeedUpsPerLaunch(config) {
-  return Math.max(0, Math.floor(restoreNumber(config.maxSpeedUpsPerLaunch, 2)));
+  return Math.max(0, Math.floor(restoreNumber(config.maxSpeedUpsPerLaunch, 3)));
 }
 
 function inferSpeedUpsUsedFromMultiplier(speedMultiplier, config) {
