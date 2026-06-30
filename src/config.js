@@ -17,6 +17,7 @@ export const GAME_CONFIG = {
   trapEscapeVerticalRatio: 0.3,
   speedUpMultiplier: 2,
   speedUpDelay: 5,
+  maxSpeedUpsPerLaunch: 2,
   launchInterval: 0.12,
   maxLaunchAngle: Math.PI - 0.22,
   minLaunchAngle: 0.12,

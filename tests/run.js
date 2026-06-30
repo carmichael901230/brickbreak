@@ -1052,7 +1052,7 @@ test("destroyed bricks are removed before the volley ends", () => {
   assert.equal(state.returnedBalls, 0);
 });
 
-test("speed up becomes available again after its cooldown", () => {
+test("speed up is limited to two uses per launch", () => {
   const customConfig = {
     ...GAME_CONFIG,
     speedUpDelay: 0.1,
@@ -1094,6 +1094,15 @@ test("speed up becomes available again after its cooldown", () => {
   const beforeSecondSpeedUp = game.getState().balls[0].vx;
   assert.equal(game.activateSpeedUp(), true);
   assert.equal(game.getState().balls[0].vx, beforeSecondSpeedUp * customConfig.speedUpMultiplier);
+  assert.equal(game.getState().speedMultiplier, customConfig.speedUpMultiplier * customConfig.speedUpMultiplier);
+  assert.equal(game.getState().speedUpsUsedThisLaunch, 2);
+
+  for (let index = 0; index < 12; index += 1) {
+    game.update(0.016);
+  }
+
+  assert.equal(game.getState().speedUpAvailable, false);
+  assert.equal(game.activateSpeedUp(), false);
   assert.equal(game.getState().speedMultiplier, customConfig.speedUpMultiplier * customConfig.speedUpMultiplier);
 });
 

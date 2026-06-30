@@ -154,6 +154,19 @@ function restoreBoolean(value, fallback) {
   return typeof value === "boolean" ? value : fallback;
 }
 
+function getMaxSpeedUpsPerLaunch(config) {
+  return Math.max(0, Math.floor(restoreNumber(config.maxSpeedUpsPerLaunch, 2)));
+}
+
+function inferSpeedUpsUsedFromMultiplier(speedMultiplier, config) {
+  const speedUpMultiplier = restoreNumber(config.speedUpMultiplier, 1);
+  if (speedUpMultiplier <= 1 || speedMultiplier <= 1) {
+    return 0;
+  }
+
+  return Math.max(0, Math.round(Math.log(speedMultiplier) / Math.log(speedUpMultiplier)));
+}
+
 function restorePoint(value, fallback = null) {
   if (!value || typeof value !== "object") {
     return fallback;
@@ -195,6 +208,7 @@ export function createInitialGameState(config = GAME_CONFIG, coins = 0, skins = 
     nextSpeedUpAt: config.speedUpDelay,
     speedUpAvailable: false,
     speedUpUsed: false,
+    speedUpsUsedThisLaunch: 0,
     state: "aiming",
     blocks: [],
     pickups: [],
@@ -263,6 +277,7 @@ export function createGameController({
     gameState.nextSpeedUpAt = config.speedUpDelay;
     gameState.speedUpAvailable = false;
     gameState.speedUpUsed = false;
+    gameState.speedUpsUsedThisLaunch = 0;
   }
 
   function syncLauncher() {
@@ -381,6 +396,7 @@ export function createGameController({
       nextSpeedUpAt: gameState.nextSpeedUpAt,
       speedUpAvailable: gameState.speedUpAvailable,
       speedUpUsed: gameState.speedUpUsed,
+      speedUpsUsedThisLaunch: gameState.speedUpsUsedThisLaunch,
       state: gameState.state,
       blocks: gameState.blocks,
       pickups: gameState.pickups,
@@ -425,6 +441,14 @@ export function createGameController({
     nextState.nextSpeedUpAt = restoreNumber(snapshot.nextSpeedUpAt, nextState.nextSpeedUpAt);
     nextState.speedUpAvailable = restoreBoolean(snapshot.speedUpAvailable, nextState.speedUpAvailable);
     nextState.speedUpUsed = restoreBoolean(snapshot.speedUpUsed, nextState.speedUpUsed);
+    const fallbackSpeedUpsUsed = inferSpeedUpsUsedFromMultiplier(nextState.speedMultiplier, config);
+    nextState.speedUpsUsedThisLaunch = Math.max(
+      0,
+      Math.floor(restoreNumber(snapshot.speedUpsUsedThisLaunch, fallbackSpeedUpsUsed))
+    );
+    if (nextState.speedUpsUsedThisLaunch >= getMaxSpeedUpsPerLaunch(config)) {
+      nextState.speedUpAvailable = false;
+    }
     nextState.freezeActive = restoreBoolean(snapshot.freezeActive, false);
     nextState.rageArmed = restoreBoolean(snapshot.rageArmed, false);
     nextState.rageVolleyActive = restoreBoolean(snapshot.rageVolleyActive, false);
@@ -516,6 +540,7 @@ export function createGameController({
     gameState.nextSpeedUpAt = config.speedUpDelay;
     gameState.speedUpAvailable = false;
     gameState.speedUpUsed = false;
+    gameState.speedUpsUsedThisLaunch = 0;
   }
 
   function emitBall() {
@@ -953,7 +978,8 @@ export function createGameController({
 
     if (gameState.state === "launching" || gameState.state === "resolving") {
       gameState.volleyElapsed += cappedDelta;
-      if (!gameState.speedUpAvailable && gameState.volleyElapsed >= gameState.nextSpeedUpAt) {
+      const canOfferSpeedUp = gameState.speedUpsUsedThisLaunch < getMaxSpeedUpsPerLaunch(config);
+      if (canOfferSpeedUp && !gameState.speedUpAvailable && gameState.volleyElapsed >= gameState.nextSpeedUpAt) {
         gameState.speedUpAvailable = true;
       }
     }
@@ -983,7 +1009,10 @@ export function createGameController({
   }
 
   function activateSpeedUp() {
-    if (!gameState.speedUpAvailable) {
+    if (
+      !gameState.speedUpAvailable ||
+      gameState.speedUpsUsedThisLaunch >= getMaxSpeedUpsPerLaunch(config)
+    ) {
       return false;
     }
 
@@ -992,6 +1021,7 @@ export function createGameController({
     gameState.speedUpAvailable = false;
     gameState.nextSpeedUpAt = gameState.volleyElapsed + config.speedUpDelay;
     gameState.speedUpUsed = true;
+    gameState.speedUpsUsedThisLaunch += 1;
 
     for (const ball of gameState.balls) {
       if (!ball.active || ball.returned) {
