@@ -31,6 +31,7 @@ const texts = {
   mainMenu: "主菜单",
   resume: "继续游戏",
   soundLabel: "音效",
+  musicLabel: "音乐",
   vibrationLabel: "震动",
   effectsLabel: "特效",
   soundOn: "开",
