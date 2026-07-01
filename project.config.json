@@ -3,7 +3,12 @@
   "compileType": "game",
   "libVersion": "3.5.4",
   "packOptions": {
-    "ignore": [],
+    "ignore": [
+      {
+        "type": "folder",
+        "value": "tmp"
+      }
+    ],
     "include": []
   },
   "setting": {
