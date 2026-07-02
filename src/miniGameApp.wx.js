@@ -120,6 +120,9 @@ const HEART_CONTINUE_PANEL_MIN_HEIGHT = 230;
 const HEART_CONTINUE_PANEL_MAX_HEIGHT = 252;
 const DOUBLE_COINS_SHARE_TEXT = "分享游戏翻倍";
 const DOUBLE_COINS_SHARE_FAILED_TEXT = "分享暂时不可用，请稍后再试";
+const SHARE_REWARD_MIN_DWELL_MS = 5000;
+const SHARE_REWARD_DWELL_FAILED_TEXT = "请分享到不同的群";
+const SHARE_REWARD_DWELL_MESSAGE_MS = 2000;
 const REVIVE_AD_LOADING_TEXT = "广告加载中";
 const REVIVE_AD_FAILED_TEXT = "广告暂时不可用，请稍后再试";
 const CLEAR_TOOL_MAX_USES_PER_RUN = 3;
@@ -663,6 +666,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let bombToolDemoStartedAt = 0;
   let bombAdLoading = false;
   let pendingBombShare = false;
+  let pendingBombShareStartedAt = 0;
   let bombPlacementArmed = false;
   let bombDrag = null;
   let bombAnimation = null;
@@ -676,6 +680,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let freezeAdLoading = false;
   let freezeAnimation = null;
   let pendingFreezeShare = false;
+  let pendingFreezeShareStartedAt = 0;
   let rageFreeItemAvailable = storage.loadRageFreeUsed() !== true;
   let rageFreeUsedThisRun = false;
   let rageShareItemsThisRun = 0;
@@ -686,6 +691,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let rageAdLoading = false;
   let rageAnimation = null;
   let pendingRageShare = false;
+  let pendingRageShareStartedAt = 0;
   let rewardedAdPurpose = null;
   let reviveAdLoading = false;
   let doubleCoinMessage = "";
@@ -693,6 +699,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let coinCollectAnimations = [];
   let addBallCollectAnimations = [];
   let pendingDoubleCoinShare = null;
+  let transientCenterMessage = null;
   let pendingCheckIn = null;
   let dailyRewardsView = null;
   let dailyClaimAnimation = null;
@@ -717,6 +724,58 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     } else {
       backgroundMusicPlayer.stop();
     }
+  }
+
+  function startShareRewardDwellTimer() {
+    return Date.now();
+  }
+
+  function shareRewardDwellSatisfied(startedAt) {
+    return Date.now() - startedAt >= SHARE_REWARD_MIN_DWELL_MS;
+  }
+
+  function showShareRewardDwellWarning() {
+    transientCenterMessage = {
+      text: SHARE_REWARD_DWELL_FAILED_TEXT,
+      expiresAt: Date.now() + SHARE_REWARD_DWELL_MESSAGE_MS
+    };
+  }
+
+  function drawTransientCenterMessage(context) {
+    if (!transientCenterMessage) {
+      return;
+    }
+    const now = Date.now();
+    if (now >= transientCenterMessage.expiresAt) {
+      transientCenterMessage = null;
+      return;
+    }
+
+    const progress = 1 - ((transientCenterMessage.expiresAt - now) / SHARE_REWARD_DWELL_MESSAGE_MS);
+    const alpha = progress > 0.78 ? clamp((1 - progress) / 0.22, 0, 1) : 1;
+    const maxWidth = Math.min(screenWidth - 40, 360);
+    const boxWidth = Math.min(maxWidth, Math.max(260, screenWidth * 0.74));
+    const boxHeight = 86;
+    const boxX = screenWidth / 2 - boxWidth / 2;
+    const boxY = screenHeight / 2 - boxHeight / 2;
+
+    context.save();
+    context.globalAlpha = alpha;
+    context.shadowColor = "rgba(0,0,0,0.45)";
+    context.shadowBlur = 16;
+    roundedRect(context, boxX, boxY, boxWidth, boxHeight, 18);
+    context.fillStyle = "rgba(24,24,27,0.94)";
+    context.fill();
+    context.shadowBlur = 0;
+    context.strokeStyle = "rgba(250,204,21,0.85)";
+    context.lineWidth = 2;
+    context.stroke();
+    context.fillStyle = "#fef3c7";
+    context.font = popupTitleFont(clamp(screenWidth * 0.062, 23, 30), 800);
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(transientCenterMessage.text, screenWidth / 2, screenHeight / 2 + 1);
+    context.restore();
   }
 
   function setEffectsEnabled(enabled) {
@@ -1114,6 +1173,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     bombToolMessage = "";
     pendingBombShare = true;
+    pendingBombShareStartedAt = startShareRewardDwellTimer();
     persistProgress(true);
     try {
       if (typeof wxApi.shareAppMessage !== "function") {
@@ -1122,6 +1182,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       wxApi.shareAppMessage(createSharePayload("bomb-tool"));
     } catch {
       pendingBombShare = false;
+      pendingBombShareStartedAt = 0;
       bombToolMessage = texts.bombShareFailed;
       persistProgress(true);
     }
@@ -1132,7 +1193,16 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       return false;
     }
 
+    if (!shareRewardDwellSatisfied(pendingBombShareStartedAt)) {
+      pendingBombShare = false;
+      pendingBombShareStartedAt = 0;
+      showShareRewardDwellWarning();
+      persistProgress(true);
+      return true;
+    }
+
     pendingBombShare = false;
+    pendingBombShareStartedAt = 0;
     if (
       (bombUsesThisRun > 0 && !bombFreeUsedThisRun) ||
       bombUsesThisRun > 1 ||
@@ -1434,6 +1504,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     freezeToolMessage = "";
     pendingFreezeShare = true;
+    pendingFreezeShareStartedAt = startShareRewardDwellTimer();
     try {
       if (typeof wxApi.shareAppMessage !== "function") {
         throw new Error("share unavailable");
@@ -1441,6 +1512,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       wxApi.shareAppMessage(createSharePayload("freeze-tool"));
     } catch {
       pendingFreezeShare = false;
+      pendingFreezeShareStartedAt = 0;
       freezeToolMessage = texts.freezeShareFailed;
     }
   }
@@ -1450,7 +1522,16 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       return false;
     }
 
+    if (!shareRewardDwellSatisfied(pendingFreezeShareStartedAt)) {
+      pendingFreezeShare = false;
+      pendingFreezeShareStartedAt = 0;
+      showShareRewardDwellWarning();
+      persistProgress(true);
+      return true;
+    }
+
     pendingFreezeShare = false;
+    pendingFreezeShareStartedAt = 0;
     if (
       (freezeUsesThisRun > 0 && !freezeFreeUsedThisRun) ||
       freezeUsesThisRun > 1 ||
@@ -1579,6 +1660,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     rageToolMessage = "";
     pendingRageShare = true;
+    pendingRageShareStartedAt = startShareRewardDwellTimer();
     persistProgress(true);
     try {
       if (typeof wxApi.shareAppMessage !== "function") {
@@ -1587,6 +1669,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       wxApi.shareAppMessage(createSharePayload("rage-tool"));
     } catch {
       pendingRageShare = false;
+      pendingRageShareStartedAt = 0;
       rageToolMessage = texts.rageShareFailed;
       persistProgress(true);
     }
@@ -1597,7 +1680,16 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       return false;
     }
 
+    if (!shareRewardDwellSatisfied(pendingRageShareStartedAt)) {
+      pendingRageShare = false;
+      pendingRageShareStartedAt = 0;
+      showShareRewardDwellWarning();
+      persistProgress(true);
+      return true;
+    }
+
     pendingRageShare = false;
+    pendingRageShareStartedAt = 0;
     if (
       (rageUsesThisRun > 0 && !rageFreeUsedThisRun) ||
       rageUsesThisRun > 1 ||
@@ -1708,6 +1800,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     const purpose = rewardedAdPurpose;
     rewardedAdPurpose = null;
     const completed = result?.isEnded === true || result === undefined;
+    syncBackgroundMusic();
 
     if (purpose === "revive") {
       reviveAdLoading = false;
@@ -1768,6 +1861,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   rewardedVideoAd?.onError?.(() => {
     const purpose = rewardedAdPurpose;
     rewardedAdPurpose = null;
+    syncBackgroundMusic();
     if (purpose === "revive") {
       reviveAdLoading = false;
       doubleCoinMessage = REVIVE_AD_FAILED_TEXT;
@@ -1835,7 +1929,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     pendingDoubleCoinShare = {
       amount,
       sourceX: rewardButton ? rewardButton.x + rewardButton.width / 2 : screenWidth / 2,
-      sourceY: rewardButton ? rewardButton.y + rewardButton.height / 2 : screenHeight * 0.68
+      sourceY: rewardButton ? rewardButton.y + rewardButton.height / 2 : screenHeight * 0.68,
+      startedAt: startShareRewardDwellTimer()
     };
     doubleCoinMessage = "";
     try {
@@ -2000,18 +2095,21 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     clearAdLoading = false;
     bombToolMessage = "";
     bombAdLoading = false;
-    pendingBombShare = progress.pendingBombShare === true;
+    pendingBombShare = false;
+    pendingBombShareStartedAt = 0;
     bombPlacementArmed = false;
     bombDrag = null;
     bombAnimation = null;
     freezeToolMessage = "";
     freezeAdLoading = false;
     freezeAnimation = null;
-    pendingFreezeShare = progress.pendingFreezeShare === true;
+    pendingFreezeShare = false;
+    pendingFreezeShareStartedAt = 0;
     rageToolMessage = "";
     rageAdLoading = false;
     rageAnimation = null;
-    pendingRageShare = progress.pendingRageShare === true;
+    pendingRageShare = false;
+    pendingRageShareStartedAt = 0;
     rewardedAdPurpose = null;
     reviveAdLoading = false;
     doubleCoinMessage = "";
@@ -2019,6 +2117,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     coinCollectAnimations = [];
     addBallCollectAnimations = [];
     pendingDoubleCoinShare = null;
+    transientCenterMessage = null;
     gameOverResult = null;
     newRecordCheerPlayed = false;
     resetRecordConfetti();
@@ -2068,6 +2167,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     bombToolMessage = "";
     bombAdLoading = false;
     pendingBombShare = false;
+    pendingBombShareStartedAt = 0;
     bombPlacementArmed = false;
     bombDrag = null;
     bombAnimation = null;
@@ -2080,6 +2180,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     freezeAdLoading = false;
     freezeAnimation = null;
     pendingFreezeShare = false;
+    pendingFreezeShareStartedAt = 0;
     rageFreeItemAvailable = storage.loadRageFreeUsed() !== true;
     rageFreeUsedThisRun = false;
     rageShareItemsThisRun = 0;
@@ -2089,6 +2190,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     rageAdLoading = false;
     rageAnimation = null;
     pendingRageShare = false;
+    pendingRageShareStartedAt = 0;
     game.restart();
     runCoinsEarned = 0;
     hasStartedRun = true;
@@ -2103,6 +2205,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     coinCollectAnimations = [];
     addBallCollectAnimations = [];
     pendingDoubleCoinShare = null;
+    transientCenterMessage = null;
     screen = "game";
     overlay = null;
     tutorialIdleTime = 0;
@@ -2163,6 +2266,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       gameOverResult.coinDoubled === true
     ) {
       return false;
+    }
+
+    if (!shareRewardDwellSatisfied(pendingDoubleCoinShare.startedAt)) {
+      pendingDoubleCoinShare = null;
+      showShareRewardDwellWarning();
+      return true;
     }
 
     const reward = pendingDoubleCoinShare;
@@ -6134,9 +6243,11 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       drawCoinDoubleAnimation(context, state, rect);
       if (overlay === "shop") {
         drawShopOverlay(context, rect);
+        drawTransientCenterMessage(context);
         return;
       }
       if (!overlay) {
+        drawTransientCenterMessage(context);
         return;
       }
     }
@@ -6192,9 +6303,11 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       }
 
       if (!overlay) {
+        drawTransientCenterMessage(context);
         return;
       }
     } else if (!overlay) {
+      drawTransientCenterMessage(context);
       return;
     }
 
@@ -6307,26 +6420,31 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     if (overlay === "leaderboard") {
       drawLeaderboardOverlay(context, panel);
+      drawTransientCenterMessage(context);
       return;
     }
 
     if (overlay === "clear-tool") {
       drawClearToolPanel(context, panel);
+      drawTransientCenterMessage(context);
       return;
     }
 
     if (overlay === "bomb-tool") {
       drawBombToolPanel(context, panel);
+      drawTransientCenterMessage(context);
       return;
     }
 
     if (overlay === "freeze-tool") {
       drawFreezeToolPanel(context, panel);
+      drawTransientCenterMessage(context);
       return;
     }
 
     if (overlay === "rage-tool") {
       drawRageToolPanel(context, panel);
+      drawTransientCenterMessage(context);
       return;
     }
 
@@ -6502,6 +6620,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     if (screen === "game" && overlay === "gameover") {
       drawCoinDoubleAnimation(context, state, rect);
     }
+    drawTransientCenterMessage(context);
   }
 
   function drawTutorialHint(context, rect) {
@@ -6760,19 +6879,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
   });
   wxApi.onShow?.(() => {
-    if (completePendingDoubleCoinShare()) {
-      return;
-    }
-    if (completePendingBombShare()) {
-      return;
-    }
-    if (completePendingRageShare()) {
-      return;
-    }
-    if (completePendingFreezeShare()) {
-      return;
-    }
-    if (screen === "menu") {
+    const handledPendingShare =
+      completePendingDoubleCoinShare() ||
+      completePendingBombShare() ||
+      completePendingRageShare() ||
+      completePendingFreezeShare();
+    if (!handledPendingShare && screen === "menu") {
       claimDailyCheckIn();
     }
     syncBackgroundMusic();
