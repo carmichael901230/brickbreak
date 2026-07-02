@@ -474,6 +474,44 @@ test("round resolves after all balls return and applies collected pickups", () =
   assert.equal(state.state, "aiming");
 });
 
+test("progress snapshot omits volatile flight state and restores settled balls", () => {
+  const game = createGameController({
+    boardGenerator: createRoundSequence([
+      { blocks: [{ id: "b1", row: 0, column: 2, hp: 3, maxHp: 3 }], pickups: [], coins: [] }
+    ]),
+    audioBus: createSilentAudioBus()
+  });
+  const state = game.getState();
+  state.ballsOwned = 3;
+  state.balls = Array.from({ length: 3 }, () => ({ ...state.balls[0] }));
+  state.particles = [{ x: 10, y: 20, vx: 1, vy: 2, life: 1, maxLife: 1, tone: "hit" }];
+
+  game.startAim({ x: 360, y: 800 });
+  game.updateAim({ x: 500, y: 300 });
+  game.releaseAim({ x: 500, y: 300 });
+  game.update(0.016);
+
+  const snapshot = game.exportSnapshot({ includeVolatile: false });
+  assert.equal(snapshot.state, "aiming");
+  assert.equal(snapshot.ballsOwned, 3);
+  assert.equal(snapshot.ballsLaunched, 0);
+  assert.equal(snapshot.returnedBalls, 0);
+  assert.equal(Object.hasOwn(snapshot, "balls"), false);
+  assert.equal(Object.hasOwn(snapshot, "particles"), false);
+
+  const restored = createGameController({
+    boardGenerator: createRoundSequence([{ blocks: [], pickups: [], coins: [] }]),
+    audioBus: createSilentAudioBus()
+  });
+
+  assert.equal(restored.importSnapshot(snapshot), true);
+  assert.equal(restored.getState().state, "aiming");
+  assert.equal(restored.getState().ballsOwned, 3);
+  assert.equal(restored.getState().balls.length, 3);
+  assert.equal(restored.getState().ballsLaunched, 0);
+  assert.equal(restored.getState().returnedBalls, 0);
+});
+
 test("freeze suppresses exactly one board advance and new row", () => {
   const game = createGameController({
     boardGenerator: createRoundSequence([
@@ -1232,6 +1270,53 @@ test("early volleys keep normal weak bounces from block tops", () => {
 
   assertClose(state.balls[0].vy, -5);
   assertClose(Math.hypot(state.balls[0].vx, state.balls[0].vy), 100);
+});
+
+test("ball collision checks nearby blocks without damaging far earlier blocks", () => {
+  const customConfig = {
+    ...GAME_CONFIG,
+    width: 180,
+    height: 260,
+    columns: 2,
+    sidePadding: 10,
+    topPadding: 80,
+    bottomPadding: 40,
+    ballRadius: 6,
+    ballSpeed: 100,
+    visualBrickGap: 8,
+    settleThreshold: 250
+  };
+  const game = createGameController({
+    config: customConfig,
+    boardGenerator: createRoundSequence([
+      { blocks: [], pickups: [] },
+      { blocks: [], pickups: [] }
+    ]),
+    audioBus: createSilentAudioBus()
+  });
+  const state = game.getState();
+  const blockSize =
+    (customConfig.width - customConfig.sidePadding * 2 - (customConfig.columns - 1) * customConfig.blockGap) /
+    customConfig.columns;
+  const visibleTop = customConfig.topPadding + customConfig.visualBrickGap / 2;
+  state.state = "resolving";
+  state.blocks = [
+    { id: "far", row: 2, column: 1, hp: 3, maxHp: 3 },
+    { id: "near", row: 0, column: 0, hp: 3, maxHp: 3 }
+  ];
+  state.balls = [{
+    x: customConfig.sidePadding + blockSize / 2,
+    y: visibleTop - customConfig.ballRadius,
+    vx: 0,
+    vy: 100,
+    active: true,
+    returned: false
+  }];
+
+  game.update(0.001);
+
+  assert.equal(state.blocks.find((block) => block.id === "far").hp, 3);
+  assert.equal(state.blocks.find((block) => block.id === "near").hp, 2);
 });
 
 test("long volleys strengthen weak vertical speed after wall bounces", () => {

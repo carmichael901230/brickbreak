@@ -506,7 +506,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   const bombSoundPlayer = createSoundPlayer(wxApi, "src/assets/sound/boom.mp3", {
     volume: 0.78
   });
-  const backgroundMusicPlayer = createBackgroundMusicPlayer(wxApi, "src/assets/sound/backgound_music.mp3", {
+  const backgroundMusicPlayer = createBackgroundMusicPlayer(wxApi, "src/assets/sound/background-music.mp3", {
     volume: 0.32
   });
   const rewardedVideoAd = wxApi.createRewardedVideoAd?.({
@@ -921,7 +921,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   function buildProgressPayload() {
-    const snapshot = game.exportSnapshot();
+    const snapshot = game.exportSnapshot({ includeVolatile: false });
     if (!snapshot || screen !== "game") {
       return null;
     }
@@ -963,14 +963,21 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   function persistProgress(force = false) {
+    const now = Date.now();
+    if (!force && lastSavedProgressAt && now - lastSavedProgressAt < 1000) {
+      return;
+    }
+
     const progress = buildProgressPayload();
     if (!progress) {
       return;
     }
 
+    const savedAt = progress.savedAt;
+    progress.savedAt = 0;
     const progressJson = JSON.stringify(progress);
-    const now = Date.now();
-    if (!force && progressJson === lastSavedProgressJson && now - lastSavedProgressAt < 1000) {
+    progress.savedAt = savedAt;
+    if (!force && progressJson === lastSavedProgressJson) {
       return;
     }
 
@@ -2531,7 +2538,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     );
   }
 
-  function currentButtons() {
+  let currentButtonsRenderCache = null;
+
+  function buildCurrentButtons() {
     const rect = canvasRect();
     const layout = shopLayout();
     const gameOverPanelLayout = gameOverPanelMetrics();
@@ -2969,6 +2978,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
 
     return buttons;
+  }
+
+  function currentButtons() {
+    return currentButtonsRenderCache ?? buildCurrentButtons();
   }
 
   function handleButton(id) {
@@ -6216,7 +6229,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     context.restore();
   }
 
-  function drawMiniOverlay(context, state) {
+  function drawMiniOverlayContent(context, state) {
     const rect = canvasRect();
 
     if (screen === "menu") {
@@ -6680,6 +6693,16 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
 
     return { x, y };
+  }
+
+  function drawMiniOverlay(context, state) {
+    const previousButtonsCache = currentButtonsRenderCache;
+    currentButtonsRenderCache = buildCurrentButtons();
+    try {
+      drawMiniOverlayContent(context, state);
+    } finally {
+      currentButtonsRenderCache = previousButtonsCache;
+    }
   }
 
   function onTouchStart(event) {

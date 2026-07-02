@@ -50,6 +50,59 @@ function entityCellKey(row, column) {
   return `${row}:${column}`;
 }
 
+function buildLiveBlockLookup(blocks) {
+  const cells = new Set();
+  const blocksByCell = new Map();
+  for (let index = 0; index < blocks.length; index += 1) {
+    const block = blocks[index];
+    if (block.hp <= 0) {
+      continue;
+    }
+
+    const key = entityCellKey(block.row, block.column);
+    cells.add(key);
+    blocksByCell.set(key, { block, index });
+  }
+
+  return { cells, blocksByCell };
+}
+
+function removeLiveBlockFromLookup(lookup, block) {
+  const key = entityCellKey(block.row, block.column);
+  lookup.cells.delete(key);
+  lookup.blocksByCell.delete(key);
+}
+
+function nearbyLiveBlocks(ball, lookup, arena, config) {
+  const reach = config.ballRadius + config.visualBrickGap;
+  const horizontalPitch = arena.blockSize + config.blockGap;
+  const minColumn = Math.floor((ball.x - reach - config.sidePadding) / horizontalPitch) - 1;
+  const maxColumn = Math.floor((ball.x + reach - config.sidePadding) / horizontalPitch) + 1;
+  const minRow = Math.floor((ball.y - reach - config.topPadding) / arena.laneHeight) - 1;
+  const maxRow = Math.floor((ball.y + reach - config.topPadding) / arena.laneHeight) + 1;
+  const candidates = [];
+
+  for (let row = minRow; row <= maxRow; row += 1) {
+    if (row < 0) {
+      continue;
+    }
+
+    for (let column = minColumn; column <= maxColumn; column += 1) {
+      if (column < 0 || column >= config.columns) {
+        continue;
+      }
+
+      const entry = lookup.blocksByCell.get(entityCellKey(row, column));
+      if (entry) {
+        candidates.push(entry);
+      }
+    }
+  }
+
+  candidates.sort((left, right) => left.index - right.index);
+  return candidates;
+}
+
 function isEntityAtFailLine(arena, config, entity) {
   const position = getEntityPosition(arena, config, entity);
   return position.y + arena.blockSize >= arena.failLineY;
@@ -372,43 +425,50 @@ export function createGameController({
     return true;
   }
 
-  function exportSnapshot() {
+  function exportSnapshot(options = {}) {
     if (gameState.state === "gameover") {
       return null;
     }
 
-    return cloneSerializable({
+    const includeVolatile = options.includeVolatile !== false;
+    const state = includeVolatile || gameState.state === "aiming" ? gameState.state : "aiming";
+    const snapshot = {
       round: gameState.round,
       score: gameState.score,
       skins: gameState.skins,
       ballsOwned: gameState.ballsOwned,
-      ballsLaunched: gameState.ballsLaunched,
-      returnedBalls: gameState.returnedBalls,
+      ballsLaunched: state === "aiming" ? 0 : gameState.ballsLaunched,
+      returnedBalls: state === "aiming" ? 0 : gameState.returnedBalls,
       launcherX: gameState.launcherX,
       launcherTargetX: gameState.launcherTargetX,
-      aiming: gameState.aiming,
-      aimDragOrigin: gameState.aimDragOrigin,
-      aimPoint: gameState.aimPoint,
-      launchDirection: gameState.launchDirection,
-      launchCooldown: gameState.launchCooldown,
-      speedMultiplier: gameState.speedMultiplier,
-      volleyElapsed: gameState.volleyElapsed,
-      nextSpeedUpAt: gameState.nextSpeedUpAt,
-      speedUpAvailable: gameState.speedUpAvailable,
-      speedUpUsed: gameState.speedUpUsed,
-      speedUpsUsedThisLaunch: gameState.speedUpsUsedThisLaunch,
-      state: gameState.state,
+      aiming: state === "aiming" ? false : gameState.aiming,
+      aimDragOrigin: state === "aiming" ? null : gameState.aimDragOrigin,
+      aimPoint: state === "aiming" ? null : gameState.aimPoint,
+      launchDirection: state === "aiming" ? null : gameState.launchDirection,
+      launchCooldown: state === "aiming" ? 0 : gameState.launchCooldown,
+      speedMultiplier: state === "aiming" ? 1 : gameState.speedMultiplier,
+      volleyElapsed: state === "aiming" ? 0 : gameState.volleyElapsed,
+      nextSpeedUpAt: state === "aiming" ? config.speedUpDelay : gameState.nextSpeedUpAt,
+      speedUpAvailable: state === "aiming" ? false : gameState.speedUpAvailable,
+      speedUpUsed: state === "aiming" ? false : gameState.speedUpUsed,
+      speedUpsUsedThisLaunch: state === "aiming" ? 0 : gameState.speedUpsUsedThisLaunch,
+      state,
       blocks: gameState.blocks,
       pickups: gameState.pickups,
       coinsOnBoard: gameState.coinsOnBoard,
-      balls: gameState.balls,
-      particles: gameState.particles,
       freezeActive: gameState.freezeActive,
       rageArmed: gameState.rageArmed,
-      rageVolleyActive: gameState.rageVolleyActive,
+      rageVolleyActive: state === "aiming" ? false : gameState.rageVolleyActive,
       bannerTimer: gameState.bannerTimer,
-      firstReturnX: gameState.firstReturnX
-    });
+      firstReturnX: state === "aiming" ? null : gameState.firstReturnX
+    };
+
+    if (includeVolatile) {
+      snapshot.balls = gameState.balls;
+      snapshot.particles = gameState.particles;
+    }
+
+    return cloneSerializable(snapshot);
   }
 
   function importSnapshot(snapshot) {
@@ -466,6 +526,9 @@ export function createGameController({
     if (Array.isArray(snapshot.coinsOnBoard)) {
       nextState.coinsOnBoard = cloneSerializable(snapshot.coinsOnBoard);
     }
+    nextState.balls = Array.from({ length: nextState.ballsOwned }, () =>
+      createBall(nextState.launcherX, nextState.arena.launcherY)
+    );
     if (Array.isArray(snapshot.balls) && snapshot.balls.length > 0) {
       nextState.balls = cloneSerializable(snapshot.balls);
     }
@@ -810,7 +873,7 @@ export function createGameController({
     return true;
   }
 
-  function updateBall(ball, deltaTime) {
+  function updateBall(ball, deltaTime, liveBlockLookup) {
     if (!ball.active || ball.returned) {
       return;
     }
@@ -829,13 +892,9 @@ export function createGameController({
       }
 
       let collided = false;
-      const liveBlockCells = new Set(
-        gameState.blocks
-          .filter((block) => block.hp > 0)
-          .map((block) => entityCellKey(block.row, block.column))
-      );
-      for (let index = 0; index < gameState.blocks.length; index += 1) {
-        const block = gameState.blocks[index];
+      const nearbyBlocks = nearbyLiveBlocks(ball, liveBlockLookup, gameState.arena, config);
+      for (const entry of nearbyBlocks) {
+        const block = entry.block;
         if (block.hp <= 0) {
           continue;
         }
@@ -846,10 +905,10 @@ export function createGameController({
           { x: position.x, y: position.y, size: gameState.arena.blockSize },
           config,
           {
-            left: liveBlockCells.has(entityCellKey(block.row, block.column - 1)),
-            right: liveBlockCells.has(entityCellKey(block.row, block.column + 1)),
-            top: liveBlockCells.has(entityCellKey(block.row - 1, block.column)),
-            bottom: liveBlockCells.has(entityCellKey(block.row + 1, block.column))
+            left: liveBlockLookup.cells.has(entityCellKey(block.row, block.column - 1)),
+            right: liveBlockLookup.cells.has(entityCellKey(block.row, block.column + 1)),
+            top: liveBlockLookup.cells.has(entityCellKey(block.row - 1, block.column)),
+            bottom: liveBlockLookup.cells.has(entityCellKey(block.row + 1, block.column))
           }
         );
 
@@ -859,6 +918,7 @@ export function createGameController({
           }
           damageBlock(block, position);
           if (block.hp <= 0) {
+            removeLiveBlockFromLookup(liveBlockLookup, block);
             removeBlock(block.id);
           }
           collided = true;
@@ -997,8 +1057,9 @@ export function createGameController({
     }
 
     if (gameState.state === "resolving" || gameState.state === "launching") {
+      const liveBlockLookup = buildLiveBlockLookup(gameState.blocks);
       for (const ball of gameState.balls) {
-        updateBall(ball, cappedDelta);
+        updateBall(ball, cappedDelta, liveBlockLookup);
       }
       finishRoundIfNeeded();
     }

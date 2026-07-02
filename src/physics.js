@@ -67,6 +67,16 @@ function reflectVelocity(ball, normal) {
   ball.vy -= 2 * dot * normal.y;
 }
 
+function isBetterInsideSide(ball, value, normalX, normalY, closestValue, closestNormalX, closestNormalY) {
+  return (
+    value < closestValue ||
+    (
+      value === closestValue &&
+      ball.vx * normalX + ball.vy * normalY < ball.vx * closestNormalX + ball.vy * closestNormalY
+    )
+  );
+}
+
 function rectCollisionCandidate(ball, rect, config) {
   const right = rect.x + rect.size;
   const bottom = rect.y + rect.size;
@@ -90,40 +100,58 @@ function rectCollisionCandidate(ball, rect, config) {
     };
   }
 
-  const distances = [
-    { value: Math.abs(ball.x - rect.x), normal: { x: -1, y: 0 }, closestX: rect.x, closestY: ball.y },
-    { value: Math.abs(right - ball.x), normal: { x: 1, y: 0 }, closestX: right, closestY: ball.y },
-    { value: Math.abs(ball.y - rect.y), normal: { x: 0, y: -1 }, closestX: ball.x, closestY: rect.y },
-    { value: Math.abs(bottom - ball.y), normal: { x: 0, y: 1 }, closestX: ball.x, closestY: bottom }
-  ];
-  distances.sort((a, b) => {
-    if (a.value !== b.value) {
-      return a.value - b.value;
-    }
-    const aDot = ball.vx * a.normal.x + ball.vy * a.normal.y;
-    const bDot = ball.vx * b.normal.x + ball.vy * b.normal.y;
-    return aDot - bDot;
-  });
+  let closestValue = Math.abs(ball.x - rect.x);
+  let normalX = -1;
+  let normalY = 0;
+  let hitX = rect.x;
+  let hitY = ball.y;
+
+  const rightDistance = Math.abs(right - ball.x);
+  if (isBetterInsideSide(ball, rightDistance, 1, 0, closestValue, normalX, normalY)) {
+    closestValue = rightDistance;
+    normalX = 1;
+    normalY = 0;
+    hitX = right;
+    hitY = ball.y;
+  }
+
+  const topDistance = Math.abs(ball.y - rect.y);
+  if (isBetterInsideSide(ball, topDistance, 0, -1, closestValue, normalX, normalY)) {
+    closestValue = topDistance;
+    normalX = 0;
+    normalY = -1;
+    hitX = ball.x;
+    hitY = rect.y;
+  }
+
+  const bottomDistance = Math.abs(bottom - ball.y);
+  if (isBetterInsideSide(ball, bottomDistance, 0, 1, closestValue, normalX, normalY)) {
+    closestValue = bottomDistance;
+    normalX = 0;
+    normalY = 1;
+    hitX = ball.x;
+    hitY = bottom;
+  }
 
   return {
-    distance: -distances[0].value,
-    normal: distances[0].normal,
-    closestX: distances[0].closestX,
-    closestY: distances[0].closestY
+    distance: -closestValue,
+    normal: { x: normalX, y: normalY },
+    closestX: hitX,
+    closestY: hitY
   };
 }
 
-function segmentCollisionCandidate(ball, segment, config) {
-  const vx = segment.x2 - segment.x1;
-  const vy = segment.y2 - segment.y1;
+function segmentCollisionCandidate(ball, x1, y1, x2, y2, normal, config) {
+  const vx = x2 - x1;
+  const vy = y2 - y1;
   const lengthSquared = vx * vx + vy * vy;
   if (lengthSquared <= 0) {
     return null;
   }
 
-  const t = Math.max(0, Math.min(1, ((ball.x - segment.x1) * vx + (ball.y - segment.y1) * vy) / lengthSquared));
-  const closestX = segment.x1 + vx * t;
-  const closestY = segment.y1 + vy * t;
+  const t = Math.max(0, Math.min(1, ((ball.x - x1) * vx + (ball.y - y1) * vy) / lengthSquared));
+  const closestX = x1 + vx * t;
+  const closestY = y1 + vy * t;
   const dx = ball.x - closestX;
   const dy = ball.y - closestY;
   const distanceSquared = dx * dx + dy * dy;
@@ -133,19 +161,29 @@ function segmentCollisionCandidate(ball, segment, config) {
   }
 
   const distance = Math.sqrt(distanceSquared);
-  const normal = distance > 0
+  const hitNormal = distance > 0
     ? { x: dx / distance, y: dy / distance }
-    : segment.normal;
+    : normal;
 
   return {
     distance,
-    normal,
+    normal: hitNormal,
     closestX,
     closestY
   };
 }
 
-function gutterSegments(rect, neighbors) {
+function nearerCollision(left, right) {
+  if (!left) {
+    return right;
+  }
+  if (!right) {
+    return left;
+  }
+  return right.distance < left.distance ? right : left;
+}
+
+function gutterCollisionCandidate(ball, rect, neighbors, config) {
   const left = rect.x;
   const right = rect.x + rect.size;
   const top = rect.y;
@@ -154,38 +192,44 @@ function gutterSegments(rect, neighbors) {
   const x2 = neighbors.right ? right + rect.inset : right;
   const y1 = neighbors.top ? top - rect.inset : top;
   const y2 = neighbors.bottom ? bottom + rect.inset : bottom;
-  const segments = [];
+  let hit = null;
 
   if (neighbors.left || neighbors.right) {
-    segments.push(
-      { x1, y1: top, x2, y2: top, normal: { x: 0, y: -1 } },
-      { x1, y1: bottom, x2, y2: bottom, normal: { x: 0, y: 1 } }
+    hit = nearerCollision(
+      hit,
+      segmentCollisionCandidate(ball, x1, top, x2, top, { x: 0, y: -1 }, config)
+    );
+    hit = nearerCollision(
+      hit,
+      segmentCollisionCandidate(ball, x1, bottom, x2, bottom, { x: 0, y: 1 }, config)
     );
   }
 
   if (neighbors.top || neighbors.bottom) {
-    segments.push(
-      { x1: left, y1, x2: left, y2, normal: { x: -1, y: 0 } },
-      { x1: right, y1, x2: right, y2, normal: { x: 1, y: 0 } }
+    hit = nearerCollision(
+      hit,
+      segmentCollisionCandidate(ball, left, y1, left, y2, { x: -1, y: 0 }, config)
+    );
+    hit = nearerCollision(
+      hit,
+      segmentCollisionCandidate(ball, right, y1, right, y2, { x: 1, y: 0 }, config)
     );
   }
 
-  return segments;
+  return hit;
 }
 
 export function resolveBallBlockCollision(ball, blockRect, config = GAME_CONFIG, neighbors = {}) {
   const rect = visibleBrickRect(blockRect, config);
-  const candidates = [
+  const hit = nearerCollision(
     rectCollisionCandidate(ball, rect, config),
-    ...gutterSegments(rect, neighbors).map((segment) => segmentCollisionCandidate(ball, segment, config))
-  ].filter(Boolean);
+    gutterCollisionCandidate(ball, rect, neighbors, config)
+  );
 
-  if (candidates.length === 0) {
+  if (!hit) {
     return false;
   }
 
-  candidates.sort((a, b) => a.distance - b.distance);
-  const hit = candidates[0];
   ball.x = hit.closestX + hit.normal.x * (config.ballRadius + 0.01);
   ball.y = hit.closestY + hit.normal.y * (config.ballRadius + 0.01);
   reflectVelocity(ball, hit.normal);
