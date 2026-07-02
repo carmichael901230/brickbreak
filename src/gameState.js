@@ -853,6 +853,7 @@ export function createGameController({
     }
 
     gameState.freezeActive = true;
+    audioBus.emit("freeze");
     return true;
   }
 

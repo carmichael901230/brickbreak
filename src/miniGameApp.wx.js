@@ -506,6 +506,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   const bombSoundPlayer = createSoundPlayer(wxApi, "src/assets/sound/boom.mp3", {
     volume: 0.78
   });
+  const freezeSoundPlayer = createSoundPlayer(wxApi, "src/assets/sound/freeze.mp3", {
+    volume: 0.72
+  });
   const backgroundMusicPlayer = createBackgroundMusicPlayer(wxApi, "src/assets/sound/background-music.mp3", {
     volume: 0.32
   });
@@ -611,6 +614,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
     if (type === "bomb") {
       playSound(bombSoundPlayer);
+    }
+    if (type === "freeze") {
+      playSound(freezeSoundPlayer);
     }
   });
 

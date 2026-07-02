@@ -587,6 +587,17 @@ test("freeze can only be activated while aiming and survives snapshots", () => {
   assert.equal(restored.getState().freezeActive, true);
 });
 
+test("activateFreeze emits a freeze audio event", () => {
+  const audioBus = createRecordingAudioBus();
+  const game = createGameController({
+    boardGenerator: createRoundSequence([{ blocks: [], pickups: [], coins: [] }]),
+    audioBus
+  });
+
+  assert.equal(game.activateFreeze(), true);
+  assert.deepEqual(audioBus.events.map((event) => event.type), ["freeze"]);
+});
+
 test("rage doubles only the next volley and removes temporary balls afterward", () => {
   const game = createGameController({
     boardGenerator: createRoundSequence([

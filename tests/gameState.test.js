@@ -18,6 +18,16 @@ function createAudioBus() {
   };
 }
 
+function createRecordingAudioBus() {
+  const events = [];
+  return {
+    events,
+    emit(type, payload = {}) {
+      events.push({ type, payload });
+    }
+  };
+}
+
 test("round resolves after all balls return and applies collected pickups", () => {
   const game = createGameController({
     boardGenerator: createBoardGenerator([
@@ -197,6 +207,17 @@ test("clearBlocksInArea leaves state unchanged when no bricks are affected", () 
 
   assert.deepEqual(result.removedBlocks, []);
   assert.deepEqual(state.blocks.map((block) => block.id), ["far"]);
+});
+
+test("activateFreeze emits a freeze audio event", () => {
+  const audioBus = createRecordingAudioBus();
+  const game = createGameController({
+    boardGenerator: createBoardGenerator([{ blocks: [], pickups: [], coins: [] }]),
+    audioBus
+  });
+
+  assert.equal(game.activateFreeze(), true);
+  assert.deepEqual(audioBus.events.map((event) => event.type), ["freeze"]);
 });
 
 test("low launch angles hide the guide and do not fire", () => {

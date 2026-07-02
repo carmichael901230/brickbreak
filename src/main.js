@@ -66,6 +66,7 @@ let effectsEnabled = settings.effectsEnabled !== false;
 effectsToggle.checked = effectsEnabled;
 const coinSound = typeof Audio === "undefined" ? null : new Audio("./src/assets/sound/coin.mp3");
 const reviveSound = typeof Audio === "undefined" ? null : new Audio("./src/assets/sound/revive.mp3");
+const freezeSound = typeof Audio === "undefined" ? null : new Audio("./src/assets/sound/freeze.mp3");
 const backgroundMusic = typeof Audio === "undefined" ? null : new Audio("./src/assets/sound/background-music.mp3");
 if (backgroundMusic) {
   backgroundMusic.loop = true;
@@ -96,6 +97,10 @@ audioBus.onEvent((event) => {
   if (event.type === "revive" && reviveSound) {
     reviveSound.currentTime = 0;
     reviveSound.play().catch(() => {});
+  }
+  if (event.type === "freeze" && freezeSound) {
+    freezeSound.currentTime = 0;
+    freezeSound.play().catch(() => {});
   }
 });
 
