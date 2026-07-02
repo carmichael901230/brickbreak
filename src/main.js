@@ -66,7 +66,7 @@ let effectsEnabled = settings.effectsEnabled !== false;
 effectsToggle.checked = effectsEnabled;
 const coinSound = typeof Audio === "undefined" ? null : new Audio("./src/assets/sound/coin.mp3");
 const reviveSound = typeof Audio === "undefined" ? null : new Audio("./src/assets/sound/revive.mp3");
-const backgroundMusic = typeof Audio === "undefined" ? null : new Audio("./src/assets/sound/backgound_music.mp3");
+const backgroundMusic = typeof Audio === "undefined" ? null : new Audio("./src/assets/sound/background-music.mp3");
 if (backgroundMusic) {
   backgroundMusic.loop = true;
   backgroundMusic.volume = 0.32;
