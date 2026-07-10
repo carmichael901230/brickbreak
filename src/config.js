@@ -10,7 +10,7 @@ export const GAME_CONFIG = {
   visualBrickGap: 8,
   collisionPadding: 5,
   ballRadius: 14,
-  ballSpeed: 800,
+  ballSpeed: 900,
   aimSensitivity: 2.35,
   trapEscapeDelay: 20,
   trapWeakVerticalRatio: 0.15,
@@ -19,7 +19,7 @@ export const GAME_CONFIG = {
   speedUpDelay: 5,
   maxSpeedUpsPerLaunch: 3,
   launchInterval: 0.12,
-  maxLaunchAngle: Math.PI - 0.22,
+  maxLaunchAngle: Math.PI - 0.0872665,
   minLaunchAngle: 0.12,
   settleThreshold: 912,
   pickupRadius: 22,
@@ -36,7 +36,8 @@ export const GAME_CONFIG = {
   effects: {
     hitFlashTime: 0.12,
     particleLife: 0.45,
-    roundBannerTime: 0.8
+    roundBannerTime: 0.8,
+    rowAdvanceTime: 0.28
   },
   skins: {
     brick: [

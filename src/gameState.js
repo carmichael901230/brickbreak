@@ -46,6 +46,17 @@ function getEntityPosition(arena, config, entity) {
   };
 }
 
+function getVisualEntityPosition(arena, config, entity) {
+  const position = getEntityPosition(arena, config, entity);
+  const animation = entity.rowAnimation;
+  if (animation && animation.duration > 0 && animation.time > 0) {
+    const progress = 1 - animation.time / animation.duration;
+    const easedProgress = 1 - Math.pow(1 - Math.max(0, Math.min(1, progress)), 3);
+    position.y += (animation.startRowOffset ?? 0) * arena.laneHeight * (1 - easedProgress);
+  }
+  return position;
+}
+
 function entityCellKey(row, column) {
   return `${row}:${column}`;
 }
@@ -135,6 +146,15 @@ function applyTrapEscape(ball, config) {
 
 function cloneSerializable(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function withoutRowAnimation(entity) {
+  if (!entity || typeof entity !== "object" || !entity.rowAnimation) {
+    return entity;
+  }
+
+  const { rowAnimation, ...rest } = entity;
+  return rest;
 }
 
 function getValidSkinIds(config, type) {
@@ -342,11 +362,27 @@ export function createGameController({
 
   function spawnRound() {
     const generated = boardGenerator.generateRound(gameState.round, gameState.blocks);
+    const rowAdvanceDuration = Math.max(0, restoreNumber(config.effects?.rowAdvanceTime, 0));
+    const shiftedRowAnimation = rowAdvanceDuration > 0
+      ? { time: rowAdvanceDuration, duration: rowAdvanceDuration, startRowOffset: -1 }
+      : null;
+    const spawnedRowAnimation = rowAdvanceDuration > 0
+      ? { time: rowAdvanceDuration, duration: rowAdvanceDuration, startRowOffset: 0, spawn: true }
+      : null;
+    const withShiftAnimation = (entity) => ({
+      ...entity,
+      row: entity.row + 1,
+      ...(shiftedRowAnimation ? { rowAnimation: { ...shiftedRowAnimation } } : {})
+    });
+    const withSpawnAnimation = (entity) => ({
+      ...entity,
+      ...(spawnedRowAnimation ? { rowAnimation: { ...spawnedRowAnimation } } : {})
+    });
 
     // The board advances first, then we add the new top row so every round feels like downward pressure.
-    gameState.blocks = gameState.blocks.map((block) => ({ ...block, row: block.row + 1 }));
-    gameState.pickups = gameState.pickups.map((pickup) => ({ ...pickup, row: pickup.row + 1 }));
-    gameState.coinsOnBoard = gameState.coinsOnBoard.map((coin) => ({ ...coin, row: coin.row + 1 }));
+    gameState.blocks = gameState.blocks.map(withShiftAnimation);
+    gameState.pickups = gameState.pickups.map(withShiftAnimation);
+    gameState.coinsOnBoard = gameState.coinsOnBoard.map(withShiftAnimation);
     gameState.pickups = gameState.pickups.filter((pickup) => {
       const position = getEntityPosition(gameState.arena, config, pickup);
       return position.y + gameState.arena.blockSize < gameState.arena.failLineY;
@@ -356,9 +392,9 @@ export function createGameController({
       return position.y + gameState.arena.blockSize < gameState.arena.failLineY;
     });
 
-    gameState.blocks.push(...generated.blocks);
-    gameState.pickups.push(...generated.pickups);
-    gameState.coinsOnBoard.push(...(generated.coins ?? []));
+    gameState.blocks.push(...generated.blocks.map(withSpawnAnimation));
+    gameState.pickups.push(...generated.pickups.map(withSpawnAnimation));
+    gameState.coinsOnBoard.push(...(generated.coins ?? []).map(withSpawnAnimation));
     gameState.bannerTimer = config.effects.roundBannerTime;
     gameState.score = Math.max(gameState.score, gameState.round - 1);
 
@@ -453,9 +489,9 @@ export function createGameController({
       speedUpUsed: state === "aiming" ? false : gameState.speedUpUsed,
       speedUpsUsedThisLaunch: state === "aiming" ? 0 : gameState.speedUpsUsedThisLaunch,
       state,
-      blocks: gameState.blocks,
-      pickups: gameState.pickups,
-      coinsOnBoard: gameState.coinsOnBoard,
+      blocks: includeVolatile ? gameState.blocks : gameState.blocks.map(withoutRowAnimation),
+      pickups: includeVolatile ? gameState.pickups : gameState.pickups.map(withoutRowAnimation),
+      coinsOnBoard: includeVolatile ? gameState.coinsOnBoard : gameState.coinsOnBoard.map(withoutRowAnimation),
       freezeActive: gameState.freezeActive,
       rageArmed: gameState.rageArmed,
       rageVolleyActive: state === "aiming" ? false : gameState.rageVolleyActive,
@@ -1014,6 +1050,21 @@ export function createGameController({
       if (block.hitFlash) {
         block.hitFlash = Math.max(0, block.hitFlash - cappedDelta);
       }
+      if (block.rowAnimation) {
+        block.rowAnimation.time = Math.max(0, block.rowAnimation.time - cappedDelta);
+        if (block.rowAnimation.time <= 0) {
+          delete block.rowAnimation;
+        }
+      }
+    }
+
+    for (const entity of [...gameState.pickups, ...gameState.coinsOnBoard]) {
+      if (entity.rowAnimation) {
+        entity.rowAnimation.time = Math.max(0, entity.rowAnimation.time - cappedDelta);
+        if (entity.rowAnimation.time <= 0) {
+          delete entity.rowAnimation;
+        }
+      }
     }
 
     if (gameState.bannerTimer > 0) {
@@ -1139,6 +1190,6 @@ export function createGameController({
     update,
     areEffectsEnabled,
     getState,
-    getEntityPosition: (entity) => getEntityPosition(gameState.arena, config, entity)
+    getEntityPosition: (entity) => getVisualEntityPosition(gameState.arena, config, entity)
   };
 }

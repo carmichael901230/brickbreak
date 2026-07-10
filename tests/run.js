@@ -565,6 +565,40 @@ test("freeze suppresses exactly one board advance and new row", () => {
   assert.equal(normalRound.blocks.some((block) => block.id === "skipped"), true);
 });
 
+test("new rounds visually slide existing blocks down into their advanced rows", () => {
+  const game = createGameController({
+    boardGenerator: createRoundSequence([
+      { blocks: [{ id: "existing", row: 0, column: 2, hp: 3, maxHp: 3 }], pickups: [], coins: [] },
+      { blocks: [{ id: "new", row: 0, column: 4, hp: 4, maxHp: 4 }], pickups: [], coins: [] }
+    ]),
+    audioBus: createSilentAudioBus()
+  });
+  const state = game.getState();
+  const laneHeight = state.arena.laneHeight;
+  const originalY = game.getEntityPosition(state.blocks[0]).y;
+
+  state.returnedBalls = state.ballsOwned;
+  state.state = "resolving";
+  game.update(0.016);
+
+  const existing = state.blocks.find((block) => block.id === "existing");
+  const newBlock = state.blocks.find((block) => block.id === "new");
+  assert.equal(existing.row, 1);
+  assert.equal(newBlock.row, 0);
+  assert.ok(existing.rowAnimation);
+  assert.ok(newBlock.rowAnimation?.spawn);
+  assert.equal(game.getEntityPosition(existing).y < originalY + laneHeight, true);
+  assert.equal(game.exportSnapshot({ includeVolatile: false }).blocks.some((block) => "rowAnimation" in block), false);
+
+  for (let index = 0; index < 20; index += 1) {
+    game.update(0.016);
+  }
+
+  assert.equal(existing.rowAnimation, undefined);
+  assert.equal(newBlock.rowAnimation, undefined);
+  assert.equal(game.getEntityPosition(existing).y, originalY + laneHeight);
+});
+
 test("freeze can only be activated while aiming and survives snapshots", () => {
   const game = createGameController({
     boardGenerator: createRoundSequence([{ blocks: [], pickups: [], coins: [] }]),

@@ -274,8 +274,12 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
           ? darkenSkinColor(brickSkinColor, lifeRatio)
         : `rgba(${mixChannel(74, 200, lifeRatio)}, ${mixChannel(102, 224, lifeRatio)}, ${mixChannel(132, 255, lifeRatio)}, 0.92)`;
       context.save();
+      if (block.rowAnimation?.spawn && block.rowAnimation.duration > 0) {
+        const progress = 1 - block.rowAnimation.time / block.rowAnimation.duration;
+        context.globalAlpha = 0.35 + Math.max(0, Math.min(1, progress)) * 0.65;
+      }
       if (state.freezeActive) {
-        context.globalAlpha = 0.72;
+        context.globalAlpha *= 0.72;
       }
       drawBrickSkin(visibleRect, fill, brickSkin, lifeRatio);
 
