@@ -31,13 +31,16 @@ export const GAME_CONFIG = {
     blockChanceRamp: 0.025,
     pickupChance: 0.72,
     guaranteedPickupRounds: 2,
-    coinChance: 0.2
+    coinChance: 0.2,
+    hpRandomGrowthRatio: 0.25,
+    hpDifficultyPercentPerTier: 5
   },
   effects: {
     hitFlashTime: 0.12,
     particleLife: 0.45,
     roundBannerTime: 0.8,
-    rowAdvanceTime: 0.28
+    rowAdvanceTime: 0.28,
+    returnSlideTime: 0.3
   },
   skins: {
     brick: [

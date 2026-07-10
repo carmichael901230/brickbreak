@@ -126,7 +126,8 @@ function createBall(launcherX, launcherY) {
     vx: 0,
     vy: 0,
     active: false,
-    returned: false
+    returned: false,
+    returnSlide: null
   };
 }
 
@@ -358,6 +359,34 @@ export function createGameController({
     if (Math.abs(gameState.launcherTargetX - gameState.launcherX) < 0.5) {
       gameState.launcherX = gameState.launcherTargetX;
     }
+  }
+
+  function getReturnSlideDuration() {
+    return Math.max(0, restoreNumber(config.effects?.returnSlideTime, 0.18));
+  }
+
+  function updateReturnSlide(ball, deltaTime) {
+    if (!ball.returnSlide) {
+      return false;
+    }
+
+    const slide = ball.returnSlide;
+    slide.elapsed += deltaTime;
+    const progress = slide.duration <= 0 ? 1 : Math.min(1, slide.elapsed / slide.duration);
+    const eased = 1 - Math.pow(1 - progress, 3);
+    ball.x = slide.fromX + (slide.toX - slide.fromX) * eased;
+    ball.y = gameState.arena.launcherY;
+
+    if (progress >= 1) {
+      ball.x = slide.toX;
+      ball.returnSlide = null;
+    }
+
+    return true;
+  }
+
+  function hasReturnSlideActive() {
+    return gameState.balls.some((ball) => Boolean(ball.returnSlide));
   }
 
   function spawnRound() {
@@ -999,9 +1028,15 @@ export function createGameController({
 
         if (gameState.firstReturnX === null) {
           gameState.firstReturnX = Math.max(config.ballRadius, Math.min(gameState.arena.width - config.ballRadius, ball.x));
+          ball.x = gameState.firstReturnX;
+        } else {
+          ball.returnSlide = {
+            fromX: ball.x,
+            toX: gameState.firstReturnX,
+            elapsed: 0,
+            duration: getReturnSlideDuration()
+          };
         }
-
-        ball.x = gameState.firstReturnX;
         break;
       }
 
@@ -1016,7 +1051,7 @@ export function createGameController({
       return;
     }
 
-    if (gameState.returnedBalls < gameState.balls.length) {
+    if (gameState.returnedBalls < gameState.balls.length || hasReturnSlideActive()) {
       return;
     }
 
@@ -1111,6 +1146,9 @@ export function createGameController({
     if (gameState.state === "resolving" || gameState.state === "launching") {
       const liveBlockLookup = buildLiveBlockLookup(gameState.blocks);
       for (const ball of gameState.balls) {
+        if (updateReturnSlide(ball, cappedDelta)) {
+          continue;
+        }
         updateBall(ball, cappedDelta, liveBlockLookup);
       }
       finishRoundIfNeeded();

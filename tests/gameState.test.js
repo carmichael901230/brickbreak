@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { GAME_CONFIG } from "../src/config.js";
 import { createGameController } from "../src/gameState.js";
 
 function createBoardGenerator(rounds) {
@@ -48,6 +49,44 @@ test("round resolves after all balls return and applies collected pickups", () =
   const state = game.getState();
   assert.equal(state.round, 2);
   assert.ok(state.ballsOwned >= 1);
+  assert.equal(state.state, "aiming");
+});
+
+test("later returned balls slide into the first landing position before round advance", () => {
+  const customConfig = {
+    ...GAME_CONFIG,
+    spawn: { ...GAME_CONFIG.spawn, minBlocks: 0, maxBlocks: 0, pickupChance: 0, guaranteedPickupRounds: 0, coinChance: 0 },
+    effects: { ...GAME_CONFIG.effects, returnSlideTime: 0.04 }
+  };
+  const game = createGameController({
+    config: customConfig,
+    boardGenerator: createBoardGenerator([{ blocks: [], pickups: [] }, { blocks: [], pickups: [] }]),
+    audioBus: createAudioBus()
+  });
+  const state = game.getState();
+  state.state = "resolving";
+  state.ballsOwned = 2;
+  state.ballsLaunched = 2;
+  state.balls = [
+    { x: 120, y: customConfig.settleThreshold + 1, vx: 0, vy: 0, active: true, returned: false, returnSlide: null },
+    { x: 480, y: customConfig.settleThreshold + 1, vx: 0, vy: 0, active: true, returned: false, returnSlide: null }
+  ];
+
+  game.update(0.016);
+
+  assert.equal(state.firstReturnX, 120);
+  assert.equal(state.returnedBalls, 2);
+  assert.equal(state.state, "resolving");
+  assert.ok(state.balls[1].returnSlide);
+  assert.equal(state.balls[1].x, 480);
+
+  game.update(0.02);
+  assert.ok(state.balls[1].x < 480);
+  assert.ok(state.balls[1].x > 120);
+  assert.equal(state.state, "resolving");
+
+  game.update(0.02);
+  assert.equal(state.launcherTargetX, 120);
   assert.equal(state.state, "aiming");
 });
 

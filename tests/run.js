@@ -193,13 +193,27 @@ test("board generator adds hp difficulty every 50 rounds", () => {
     ...GAME_CONFIG,
     spawn: {
       ...GAME_CONFIG.spawn,
-      coinChance: 0
+      coinChance: 0,
+      hpDifficultyPercentPerTier: 10
     }
   };
 
   assert.ok(createBoardGenerator(config, () => 0).generateRound(49, []).blocks.every((block) => block.hp === 49));
-  assert.ok(createBoardGenerator(config, () => 0).generateRound(50, []).blocks.every((block) => block.hp === 53));
-  assert.ok(createBoardGenerator(config, () => 0).generateRound(100, []).blocks.every((block) => block.hp === 110));
+  assert.ok(createBoardGenerator(config, () => 0).generateRound(50, []).blocks.every((block) => block.hp === 55));
+  assert.ok(createBoardGenerator(config, () => 0).generateRound(100, []).blocks.every((block) => block.hp === 120));
+});
+
+test("board generator uses configured hp random growth ratio", () => {
+  const config = {
+    ...GAME_CONFIG,
+    spawn: {
+      ...GAME_CONFIG.spawn,
+      coinChance: 0,
+      hpRandomGrowthRatio: 0.5
+    }
+  };
+
+  assert.ok(createBoardGenerator(config, () => 0.999).generateRound(10, []).blocks.every((block) => block.hp === 14));
 });
 
 test("board generator avoids spawning into occupied top-row columns", () => {
@@ -471,6 +485,44 @@ test("round resolves after all balls return and applies collected pickups", () =
   const state = game.getState();
   assert.equal(state.round, 2);
   assert.ok(state.ballsOwned >= 1);
+  assert.equal(state.state, "aiming");
+});
+
+test("later returned balls slide into the first landing position before round advance", () => {
+  const customConfig = {
+    ...GAME_CONFIG,
+    spawn: { ...GAME_CONFIG.spawn, minBlocks: 0, maxBlocks: 0, pickupChance: 0, guaranteedPickupRounds: 0, coinChance: 0 },
+    effects: { ...GAME_CONFIG.effects, returnSlideTime: 0.04 }
+  };
+  const game = createGameController({
+    config: customConfig,
+    boardGenerator: createRoundSequence([{ blocks: [], pickups: [] }, { blocks: [], pickups: [] }]),
+    audioBus: createSilentAudioBus()
+  });
+  const state = game.getState();
+  state.state = "resolving";
+  state.ballsOwned = 2;
+  state.ballsLaunched = 2;
+  state.balls = [
+    { x: 120, y: customConfig.settleThreshold + 1, vx: 0, vy: 0, active: true, returned: false, returnSlide: null },
+    { x: 480, y: customConfig.settleThreshold + 1, vx: 0, vy: 0, active: true, returned: false, returnSlide: null }
+  ];
+
+  game.update(0.016);
+
+  assert.equal(state.firstReturnX, 120);
+  assert.equal(state.returnedBalls, 2);
+  assert.equal(state.state, "resolving");
+  assert.ok(state.balls[1].returnSlide);
+  assert.equal(state.balls[1].x, 480);
+
+  game.update(0.02);
+  assert.ok(state.balls[1].x < 480);
+  assert.ok(state.balls[1].x > 120);
+  assert.equal(state.state, "resolving");
+
+  game.update(0.02);
+  assert.equal(state.launcherTargetX, 120);
   assert.equal(state.state, "aiming");
 });
 

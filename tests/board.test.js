@@ -30,13 +30,27 @@ test("board generator adds hp difficulty every 50 rounds", () => {
     ...GAME_CONFIG,
     spawn: {
       ...GAME_CONFIG.spawn,
-      coinChance: 0
+      coinChance: 0,
+      hpDifficultyPercentPerTier: 10
     }
   };
 
   assert.ok(createBoardGenerator(config, () => 0).generateRound(49, []).blocks.every((block) => block.hp === 49));
-  assert.ok(createBoardGenerator(config, () => 0).generateRound(50, []).blocks.every((block) => block.hp === 53));
-  assert.ok(createBoardGenerator(config, () => 0).generateRound(100, []).blocks.every((block) => block.hp === 110));
+  assert.ok(createBoardGenerator(config, () => 0).generateRound(50, []).blocks.every((block) => block.hp === 55));
+  assert.ok(createBoardGenerator(config, () => 0).generateRound(100, []).blocks.every((block) => block.hp === 120));
+});
+
+test("board generator uses configured hp random growth ratio", () => {
+  const config = {
+    ...GAME_CONFIG,
+    spawn: {
+      ...GAME_CONFIG.spawn,
+      coinChance: 0,
+      hpRandomGrowthRatio: 0.5
+    }
+  };
+
+  assert.ok(createBoardGenerator(config, () => 0.999).generateRound(10, []).blocks.every((block) => block.hp === 14));
 });
 
 test("board generator avoids spawning into occupied top-row columns", () => {

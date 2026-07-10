@@ -582,9 +582,13 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
     const image = ballSkin?.gameImage ?? ballSkin?.image;
     const asset = image ? ballSkinAssets[image] : null;
 
+    if (state.firstReturnX !== null && state.state !== "aiming") {
+      drawBallSkin(state.firstReturnX, state.arena.launcherY, config.ballRadius, ballSkin, asset, 12);
+    }
+
     for (const ball of state.balls) {
-      // Only active balls should render in-flight; settled or queued balls are represented by the launcher.
-      if (!ball.active || ball.returned) {
+      // Active balls render in-flight; returned balls render only while sliding into the landing marker.
+      if (!ball.active && !ball.returnSlide) {
         continue;
       }
 

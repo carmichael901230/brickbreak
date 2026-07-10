@@ -24,9 +24,11 @@ export function createBoardGenerator(config = GAME_CONFIG, random = Math.random)
   }
 
   function createBlockHp(round) {
-    const baseHp = Math.max(1, round + Math.floor(rng() * Math.max(2, Math.ceil(round * 0.35))));
+    const randomGrowthRatio = Math.max(0, config.spawn.hpRandomGrowthRatio ?? 0.35);
+    const difficultyPercentPerTier = Math.max(0, config.spawn.hpDifficultyPercentPerTier ?? 5);
+    const baseHp = Math.max(1, round + Math.floor(rng() * Math.max(2, Math.ceil(round * randomGrowthRatio))));
     const difficultyTier = Math.floor(Math.max(1, Math.floor(round)) / 50);
-    const difficultyPercent = 100 + difficultyTier * 5;
+    const difficultyPercent = 100 + difficultyTier * difficultyPercentPerTier;
     return Math.ceil((baseHp * difficultyPercent) / 100);
   }
 
