@@ -139,11 +139,41 @@ const REWARDED_AD_UNIT_ID = "adunit-fce0dbb1a75742d4";
 const ITEM_TRAY_HEIGHT = 86;
 const ITEM_TRAY_GAP = 8;
 const CLEAR_ANIMATION_DURATION = 550;
+const SHOP_BRICK_PREVIEW_REPLAY_MS = 5000;
 const GAME_ROUNDED_FONT_FAMILY = '"YouYuan", "幼圆", "Arial Rounded MT Bold", "PingFang SC", "Microsoft YaHei", sans-serif';
 const POPUP_TITLE_FONT_FAMILY = '"YouYuan", "幼圆", "PingFang SC", "Microsoft YaHei", sans-serif';
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function parseHexColor(color) {
+  if (typeof color !== "string" || !color.startsWith("#")) {
+    return null;
+  }
+
+  const normalized = color.length === 4
+    ? color.slice(1).split("").map((char) => char + char).join("")
+    : color.slice(1);
+  if (!/^[0-9a-f]{6}$/i.test(normalized)) {
+    return null;
+  }
+
+  return {
+    r: Number.parseInt(normalized.slice(0, 2), 16),
+    g: Number.parseInt(normalized.slice(2, 4), 16),
+    b: Number.parseInt(normalized.slice(4, 6), 16)
+  };
+}
+
+function darkenParsedSkinColor(rgb, lifeRatio) {
+  const shade = 0.36 + clamp(lifeRatio, 0, 1) * 0.64;
+  return `rgba(${Math.round(rgb.r * shade)}, ${Math.round(rgb.g * shade)}, ${Math.round(rgb.b * shade)}, 0.92)`;
+}
+
+function darkenSkinColor(color, lifeRatio) {
+  const rgb = parseHexColor(color);
+  return rgb ? darkenParsedSkinColor(rgb, lifeRatio) : color;
 }
 
 function heartContinuePanelRect(rect) {
@@ -432,6 +462,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
   const storage = createWeChatStorageAdapter(wxApi);
   const settings = storage.loadSettings();
+  let viewedNewSkinIds = new Set(storage.loadViewedNewSkins());
   const audioBus = createAudioBus();
   audioBus.setEnabled(settings.soundEnabled);
   let musicEnabled = settings.musicEnabled !== false;
@@ -477,13 +508,20 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       .filter(Boolean)
       .map((image) => [image, loadImageAsset(wxApi, canvas, image)])
   );
+  const brickSkinOverlayAssets = Object.fromEntries(
+    GAME_CONFIG.skins.brick
+      .map((skin) => skin.overlayImage ?? skin.image)
+      .filter(Boolean)
+      .map((image) => [image, loadImageAsset(wxApi, canvas, image)])
+  );
   const renderer = createRenderer(canvas, GAME_CONFIG, {
     autoResize: false,
     pixelRatio,
     showRoundBanner: false,
     coinAsset: coinIconAsset,
     heartAsset: heartIconAsset,
-    ballSkinAssets
+    ballSkinAssets,
+    brickSkinOverlayAssets
   });
   renderer.context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
   const hitSoundPlayer = createSoundPlayer(wxApi, "src/assets/sound/bubble_sound.m4a", {
@@ -643,6 +681,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let lastSavedSkinsJson = JSON.stringify(storage.loadSkins());
   let shopCategory = "brick";
   let pendingPurchase = null;
+  let shopPreview = null;
   let shopMessage = "";
   let shopBannerUntil = 0;
   let shopScrollY = 0;
@@ -1108,10 +1147,29 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     if (inventoryCount > 0) {
       return "use";
     }
-    if (usesThisRun === 0 || (usesThisRun === 1 && freeUsedThisRun)) {
-      return "share";
-    }
-    return "ad";
+    return "retrieve";
+  }
+
+  function itemRetrieveChoiceButtons(panel, prefix) {
+    const gap = 10;
+    const width = (panel.width - 64 - gap) / 2;
+    const y = panel.y + panel.height - 76;
+    return [
+      {
+        id: `${prefix}-share`,
+        x: panel.x + 32,
+        y,
+        width,
+        height: 52
+      },
+      {
+        id: `${prefix}-ad`,
+        x: panel.x + 32 + width + gap,
+        y,
+        width,
+        height: 52
+      }
+    ];
   }
 
   function bombToolPanelMode() {
@@ -1156,14 +1214,6 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       return;
     }
     const mode = bombToolPanelMode();
-    if (mode === "share") {
-      requestBombToolShare();
-      return;
-    }
-    if (mode === "ad") {
-      requestBombToolAd();
-      return;
-    }
     if (mode !== "use") {
       return;
     }
@@ -1177,9 +1227,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     if (
       pendingBombShare ||
       bombFreeItemAvailable ||
-      (bombUsesThisRun > 0 && !bombFreeUsedThisRun) ||
-      bombUsesThisRun > 1 ||
       bombUsesThisRun + bombToolInventoryCount() >= BOMB_MAX_USES_PER_RUN ||
+      rewardedAdPurpose ||
       game.getState().state !== "aiming"
     ) {
       return;
@@ -1218,8 +1267,6 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     pendingBombShare = false;
     pendingBombShareStartedAt = 0;
     if (
-      (bombUsesThisRun > 0 && !bombFreeUsedThisRun) ||
-      bombUsesThisRun > 1 ||
       bombUsesThisRun + bombToolInventoryCount() >= BOMB_MAX_USES_PER_RUN
     ) {
       persistProgress(true);
@@ -1235,8 +1282,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     if (
       bombAdLoading ||
       bombFreeItemAvailable ||
-      bombUsesThisRun === 0 ||
-      (bombUsesThisRun === 1 && bombFreeUsedThisRun) ||
+      pendingBombShare ||
       bombUsesThisRun + bombToolInventoryCount() >= BOMB_MAX_USES_PER_RUN ||
       rewardedAdPurpose
     ) {
@@ -1508,9 +1554,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     if (
       pendingFreezeShare ||
       freezeFreeItemAvailable ||
-      (freezeUsesThisRun > 0 && !freezeFreeUsedThisRun) ||
-      freezeUsesThisRun > 1 ||
       freezeUsesThisRun + freezeToolInventoryCount() >= FREEZE_MAX_USES_PER_RUN ||
+      rewardedAdPurpose ||
       game.getState().state !== "aiming"
     ) {
       return;
@@ -1547,8 +1592,6 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     pendingFreezeShare = false;
     pendingFreezeShareStartedAt = 0;
     if (
-      (freezeUsesThisRun > 0 && !freezeFreeUsedThisRun) ||
-      freezeUsesThisRun > 1 ||
       freezeUsesThisRun + freezeToolInventoryCount() >= FREEZE_MAX_USES_PER_RUN
     ) {
       persistProgress(true);
@@ -1564,8 +1607,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     if (
       freezeAdLoading ||
       freezeFreeItemAvailable ||
-      freezeUsesThisRun === 0 ||
-      (freezeUsesThisRun === 1 && freezeFreeUsedThisRun) ||
+      pendingFreezeShare ||
       freezeUsesThisRun + freezeToolInventoryCount() >= FREEZE_MAX_USES_PER_RUN ||
       rewardedAdPurpose
     ) {
@@ -1598,14 +1640,6 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
 
     const mode = freezeToolPanelMode();
-    if (mode === "share") {
-      requestFreezeToolShare();
-      return;
-    }
-    if (mode === "ad") {
-      requestFreezeToolAd();
-      return;
-    }
     if (mode !== "use" || !game.activateFreeze()) {
       return;
     }
@@ -1664,9 +1698,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     if (
       pendingRageShare ||
       rageFreeItemAvailable ||
-      (rageUsesThisRun > 0 && !rageFreeUsedThisRun) ||
-      rageUsesThisRun > 1 ||
       rageUsesThisRun + rageToolInventoryCount() >= RAGE_MAX_USES_PER_RUN ||
+      rewardedAdPurpose ||
       game.getState().state !== "aiming"
     ) {
       return;
@@ -1705,8 +1738,6 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     pendingRageShare = false;
     pendingRageShareStartedAt = 0;
     if (
-      (rageUsesThisRun > 0 && !rageFreeUsedThisRun) ||
-      rageUsesThisRun > 1 ||
       rageUsesThisRun + rageToolInventoryCount() >= RAGE_MAX_USES_PER_RUN
     ) {
       persistProgress(true);
@@ -1722,8 +1753,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     if (
       rageAdLoading ||
       rageFreeItemAvailable ||
-      rageUsesThisRun === 0 ||
-      (rageUsesThisRun === 1 && rageFreeUsedThisRun) ||
+      pendingRageShare ||
       rageUsesThisRun + rageToolInventoryCount() >= RAGE_MAX_USES_PER_RUN ||
       rewardedAdPurpose
     ) {
@@ -1755,14 +1785,6 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       return;
     }
     const mode = rageToolPanelMode();
-    if (mode === "share") {
-      requestRageToolShare();
-      return;
-    }
-    if (mode === "ad") {
-      requestRageToolAd();
-      return;
-    }
     if (mode !== "use" || !game.activateRage()) {
       return;
     }
@@ -2356,6 +2378,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     overlay = "shop";
     shopCategory = "brick";
     pendingPurchase = null;
+    shopPreview = null;
     shopMessage = "";
     shopScrollY = 0;
   }
@@ -2489,12 +2512,121 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     return clamp(value, 0, shopLayout().maxScrollY);
   }
 
+  function shopPreviewLayout() {
+    const rect = canvasRect();
+    const width = Math.min(rect.width - 38, 360);
+    const height = clamp(rect.height * 0.66, 440, 520);
+    const x = rect.x + (rect.width - width) / 2;
+    const y = rect.y + Math.max(40, (rect.height - height) / 2);
+    const buttonGap = 12;
+    const cancelWidth = Math.max(104, (width - 48 - buttonGap) * 0.38);
+    const actionWidth = width - 48 - buttonGap - cancelWidth;
+    const buttonY = y + height - 70;
+
+    return {
+      x,
+      y,
+      width,
+      height,
+      closeX: x + width - 44,
+      closeY: y + 18,
+      previewX: x + 24,
+      previewY: y + 86,
+      previewWidth: width - 48,
+      previewHeight: buttonY - y - 110,
+      buttonY,
+      cancelX: x + 24,
+      cancelWidth,
+      actionX: x + 24 + cancelWidth + buttonGap,
+      actionWidth
+    };
+  }
+
   function isSkinOwned(category, skinId) {
     const skin = GAME_CONFIG.skins[category].find((candidate) => candidate.id === skinId);
     return Boolean(skin?.default) || game.getState().skins.owned[category].includes(skinId);
   }
 
-  function handleSkinTap(category, skinId) {
+  function hasUnownedNewSkin() {
+    return Object.entries(GAME_CONFIG.skins).some(([category, skins]) =>
+      skins.some((skin) => isNewSkinHighlightVisible(category, skin))
+    );
+  }
+
+  function isNewSkinHighlightVisible(category, skin) {
+    return Boolean(skin.isNew && !skin.default && !viewedNewSkinIds.has(skin.id) && !isSkinOwned(category, skin.id));
+  }
+
+  function markNewSkinViewed(skin) {
+    if (!skin?.isNew || viewedNewSkinIds.has(skin.id)) {
+      return;
+    }
+
+    viewedNewSkinIds = new Set([...viewedNewSkinIds, skin.id]);
+    storage.saveViewedNewSkins([...viewedNewSkinIds]);
+  }
+
+  function openShopPreview(category, skinId) {
+    if (category !== "brick") {
+      return;
+    }
+    const skin = GAME_CONFIG.skins[category].find((candidate) => candidate.id === skinId);
+    if (!skin) {
+      return;
+    }
+    markNewSkinViewed(skin);
+    shopPreview = {
+      category,
+      skinId,
+      openedAt: Date.now(),
+      demo: null
+    };
+    pendingPurchase = null;
+    shopMessage = "";
+  }
+
+  function closeShopPreview() {
+    shopPreview = null;
+  }
+
+  function handleShopPreviewAction() {
+    if (!shopPreview) {
+      return;
+    }
+    const { category, skinId } = shopPreview;
+    const skin = GAME_CONFIG.skins[category].find((candidate) => candidate.id === skinId);
+    if (!skin) {
+      return;
+    }
+
+    const skins = cloneSerializable(game.getState().skins);
+    if (skin.default || skins.owned[category].includes(skin.id)) {
+      skins.selected[category] = skin.default ? null : skin.id;
+      game.setSkins(skins);
+      syncSkins();
+      shopMessage = texts.selected;
+      closeShopPreview();
+      return;
+    }
+
+    if (!game.spendCoins(skin.price)) {
+      shopMessage = "";
+      shopBannerUntil = Date.now() + 2000;
+      closeShopPreview();
+      return;
+    }
+
+    skins.owned[category].push(skin.id);
+    skins.selected[category] = skin.id;
+    game.setSkins(skins);
+    syncCoins();
+    syncSkins();
+    shopMessage = texts.selected;
+    closeShopPreview();
+  }
+
+  function handleBallSkinTap(skinId) {
+    const category = "ball";
     const skin = GAME_CONFIG.skins[category].find((candidate) => candidate.id === skinId);
     if (!skin) {
       return;
@@ -2705,6 +2837,16 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
       if (overlay === "shop") {
         const tabWidth = (layout.panel.width - 44) / 2;
+        if (shopPreview) {
+          const popup = shopPreviewLayout();
+          buttons.push(
+            { id: "shop-preview-close", x: popup.closeX, y: popup.closeY, width: 26, height: 26 },
+            { id: "shop-preview-cancel", x: popup.cancelX, y: popup.buttonY, width: popup.cancelWidth, height: 48 },
+            { id: "shop-preview-action", x: popup.actionX, y: popup.buttonY, width: popup.actionWidth, height: 48 }
+          );
+          return buttons;
+        }
+
         buttons.push(
           { id: "shop-done", x: layout.panel.x + 4, y: layout.panel.y + 8, width: 58, height: 58 },
           { id: "shop-tab-brick", x: layout.panel.x + 12, y: layout.panel.y + 104, width: tabWidth, height: 44 },
@@ -2882,7 +3024,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         height: 24
       });
 
-      if (bombToolPanelMode() !== "limit") {
+      const mode = bombToolPanelMode();
+      if (mode === "retrieve") {
+        buttons.push(...itemRetrieveChoiceButtons(clearToolPanel, "bomb-tool"));
+      } else if (mode !== "limit") {
         buttons.push({
           id: "bomb-tool-confirm",
           x: clearToolPanel.x + 32,
@@ -2902,7 +3047,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         height: 24
       });
 
-      if (freezeToolPanelMode() !== "limit") {
+      const mode = freezeToolPanelMode();
+      if (mode === "retrieve") {
+        buttons.push(...itemRetrieveChoiceButtons(clearToolPanel, "freeze-tool"));
+      } else if (mode !== "limit") {
         buttons.push({
           id: "freeze-tool-confirm",
           x: clearToolPanel.x + 32,
@@ -2922,7 +3070,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         height: 24
       });
 
-      if (rageToolPanelMode() !== "limit") {
+      const mode = rageToolPanelMode();
+      if (mode === "retrieve") {
+        buttons.push(...itemRetrieveChoiceButtons(clearToolPanel, "rage-tool"));
+      } else if (mode !== "limit") {
         buttons.push({
           id: "rage-tool-confirm",
           x: clearToolPanel.x + 32,
@@ -3024,19 +3175,29 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       case "shop-tab-brick":
         shopCategory = "brick";
         pendingPurchase = null;
+        shopPreview = null;
         shopMessage = "";
         shopScrollY = 0;
         break;
       case "shop-tab-ball":
         shopCategory = "ball";
         pendingPurchase = null;
+        shopPreview = null;
         shopMessage = "";
         shopScrollY = 0;
         break;
       case "shop-done":
         overlay = null;
         pendingPurchase = null;
+        shopPreview = null;
         shopMessage = "";
+        break;
+      case "shop-preview-close":
+      case "shop-preview-cancel":
+        closeShopPreview();
+        break;
+      case "shop-preview-action":
+        handleShopPreviewAction();
         break;
       case "restart":
         startRun();
@@ -3111,6 +3272,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       case "bomb-tool-confirm":
         confirmBombToolUse();
         break;
+      case "bomb-tool-share":
+        requestBombToolShare();
+        break;
+      case "bomb-tool-ad":
+        requestBombToolAd();
+        break;
       case "freeze-tool":
         openFreezeToolPanel();
         break;
@@ -3121,6 +3288,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       case "freeze-tool-confirm":
         confirmFreezeToolUse();
         break;
+      case "freeze-tool-share":
+        requestFreezeToolShare();
+        break;
+      case "freeze-tool-ad":
+        requestFreezeToolAd();
+        break;
       case "rage-tool":
         openRageToolPanel();
         break;
@@ -3130,6 +3303,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         break;
       case "rage-tool-confirm":
         confirmRageToolUse();
+        break;
+      case "rage-tool-share":
+        requestRageToolShare();
+        break;
+      case "rage-tool-ad":
+        requestRageToolAd();
         break;
       case "resume":
         overlay = null;
@@ -3166,7 +3345,11 @@ export function bootMiniGame(wxApi = globalThis.wx) {
           const index = Number(id.split("-").pop());
           const skin = GAME_CONFIG.skins[shopCategory][index];
           if (skin) {
-            handleSkinTap(shopCategory, skin.id);
+            if (shopCategory === "brick") {
+              openShopPreview(shopCategory, skin.id);
+            } else {
+              handleBallSkinTap(skin.id);
+            }
           }
         }
         break;
@@ -3358,6 +3541,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       ? state.skins.selected[category] === null
       : state.skins.selected[category] === skin.id;
     const pending = pendingPurchase?.category === category && pendingPurchase.skinId === skin.id;
+    const isNew = isNewSkinHighlightVisible(category, skin);
     const sampleSize = Math.min(button.width * 0.64, button.height * 0.54);
     const sampleX = button.x + button.width / 2;
     const sampleY = button.y + 18 + sampleSize / 2;
@@ -3366,8 +3550,26 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     roundedRect(context, button.x, button.y, button.width, button.height, 8);
     context.fillStyle = selected ? "rgba(134,239,172,0.18)" : "rgba(255,255,255,0.08)";
     context.fill();
-    context.strokeStyle = selected ? "rgba(134,239,172,0.78)" : "rgba(255,255,255,0.12)";
-    context.lineWidth = 1;
+    if (isNew) {
+      const glow = context.createRadialGradient(
+        sampleX,
+        sampleY,
+        sampleSize * 0.18,
+        sampleX,
+        sampleY,
+        sampleSize * 1.2
+      );
+      glow.addColorStop(0, "rgba(250,204,21,0.24)");
+      glow.addColorStop(1, "rgba(250,204,21,0)");
+      context.fillStyle = glow;
+      context.fill();
+    }
+    context.strokeStyle = selected
+      ? "rgba(134,239,172,0.78)"
+      : isNew
+        ? "rgba(250,204,21,0.84)"
+        : "rgba(255,255,255,0.12)";
+    context.lineWidth = isNew ? 2 : 1;
     context.stroke();
 
     if (category === "ball") {
@@ -3389,6 +3591,20 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       }
     } else {
       drawBrickSample(context, sampleX - sampleSize / 2, sampleY - sampleSize / 2, sampleSize, skin);
+    }
+
+    if (isNew) {
+      const badgeSize = 26;
+      const badgeX = sampleX + sampleSize / 2 - badgeSize * 0.72;
+      const badgeY = Math.max(button.y + 7, sampleY - sampleSize / 2 - badgeSize * 0.28);
+      roundedRect(context, badgeX, badgeY, badgeSize, badgeSize, badgeSize / 2);
+      context.fillStyle = "#facc15";
+      context.fill();
+      context.fillStyle = "#1d1d1d";
+      context.font = "900 14px sans-serif";
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText("新", badgeX + badgeSize / 2, badgeY + badgeSize / 2 + 1);
     }
 
     const label = selected ? texts.selected : owned ? texts.use : pending ? texts.buy : String(skin.price);
@@ -3414,19 +3630,30 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
   }
 
-  function drawBrickSample(context, x, y, size, skin) {
+  function drawBrickSample(context, x, y, size, skin, options = {}) {
     const centerX = x + size / 2;
     const centerY = y + size / 2;
     const accent = skin.accent ?? "rgba(255,255,255,0.72)";
+    const lifeRatio = options.lifeRatio ?? 1;
 
     context.save();
-    context.fillStyle = skin.color;
-    context.fillRect(x, y, size, size);
+    context.fillStyle = options.fill ?? skin.color;
     context.beginPath();
-    context.rect(x, y, size, size);
+    if (skin.shape === "rounded") {
+      roundedRect(context, x, y, size, size, size * 0.14);
+    } else {
+      context.rect(x, y, size, size);
+    }
+    context.fill();
+    context.beginPath();
+    if (skin.shape === "rounded") {
+      roundedRect(context, x, y, size, size, size * 0.14);
+    } else {
+      context.rect(x, y, size, size);
+    }
     context.clip();
 
-    context.globalAlpha = 0.72;
+    context.globalAlpha = options.patternAlpha ?? 0.55 + clamp(lifeRatio, 0, 1) * 0.28;
     context.strokeStyle = accent;
     context.fillStyle = accent;
     context.lineWidth = Math.max(2, size * 0.05);
@@ -3546,9 +3773,446 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     shine.addColorStop(1, "rgba(0,0,0,0.18)");
     context.fillStyle = shine;
     context.fillRect(x, y, size, size);
+    const overlay = skin.overlayImage ? brickSkinOverlayAssets[skin.overlayImage] : null;
+    if (overlay?.loaded && overlay.image) {
+      context.drawImage(overlay.image, x, y, size, size);
+    }
+    if (!skin.borderless) {
+      context.strokeStyle = "rgba(255,255,255,0.18)";
+      context.lineWidth = 2;
+      context.strokeRect(x, y, size, size);
+    }
+    context.restore();
+  }
+
+  function drawPreviewBall(context, x, y, radius, skin) {
+    const image = skin?.gameImage ?? skin?.storeImage ?? skin?.image;
+    const asset = image ? ballSkinAssets[image] ?? shopBallSkinAssets[image] : null;
+    if (asset?.loaded && asset.image) {
+      context.drawImage(asset.image, x - radius, y - radius, radius * 2, radius * 2);
+      return;
+    }
+
+    context.save();
+    context.beginPath();
+    context.arc(x, y, radius, 0, Math.PI * 2);
+    context.fillStyle = skin?.color ?? "#eff9ff";
+    context.shadowColor = skin?.color ?? "#eff9ff";
+    context.shadowBlur = 10;
+    context.fill();
+    context.shadowBlur = 0;
+    context.strokeStyle = "rgba(255,255,255,0.5)";
+    context.lineWidth = Math.max(2, radius * 0.18);
+    context.stroke();
+    context.restore();
+  }
+
+  function createShopBrickPreviewDemo(area) {
+    const columns = 4;
+    const rows = 3;
+    const gridGap = clamp(area.previewWidth * 0.018, 5, 8);
+    const gridWidth = area.previewWidth - 34;
+    const gridHeight = area.previewHeight * 0.58;
+    const blockSize = Math.min(
+      clamp(area.previewWidth * 0.18, 38, 50),
+      (gridWidth - gridGap * (columns - 1)) / columns,
+      (gridHeight - gridGap * (rows - 1)) / rows
+    );
+    const gridActualWidth = columns * blockSize + (columns - 1) * gridGap;
+    const gridActualHeight = rows * blockSize + (rows - 1) * gridGap;
+    const gridX = area.previewX + (area.previewWidth - gridActualWidth) / 2;
+    const gridY = area.previewY + 18;
+    const cells = [
+      [0, 0, 2],
+      [1, 0, 4],
+      [2, 0, 3],
+      [3, 0, 5],
+      [0, 1, 4],
+      [1, 1, 2],
+      [2, 1, 5],
+      [3, 1, 3],
+      [0, 2, 2],
+      [1, 2, 5],
+      [2, 2, 4],
+      [3, 2, 3]
+    ];
+    const blocks = cells.map(([col, row, hp], index) => {
+      const maxHp = hp;
+      return {
+        id: index,
+        x: gridX + col * (blockSize + gridGap),
+        y: gridY + row * (blockSize + gridGap),
+        size: blockSize,
+        hp,
+        maxHp,
+        hitFlash: 0
+      };
+    });
+    const ballRadius = clamp(blockSize * 0.16, 6, 8);
+    const startX = area.previewX + area.previewWidth * 0.18;
+    const startY = Math.max(area.previewY + area.previewHeight - 34, gridY + gridActualHeight + 28);
+    const speeds = [
+      [145, -235],
+      [170, -250],
+      [195, -225],
+      [220, -245],
+      [245, -230],
+      [270, -250]
+    ];
+
+    return {
+      width: area.previewWidth,
+      height: area.previewHeight,
+      startedAt: Date.now(),
+      lastAt: Date.now(),
+      resetAt: 0,
+      blocks,
+      particles: [],
+      balls: speeds.map(([vx, vy], index) => ({
+        x: startX - index * ballRadius * 1.2,
+        y: startY + index * 2,
+        vx,
+        vy,
+        radius: ballRadius,
+        cooldown: 0
+      }))
+    };
+  }
+
+  function previewBrickPalette(skin, block) {
+    const lifeRatio = Math.max(0, Math.min(1, (block?.hp ?? 1) / Math.max(1, block?.maxHp ?? block?.hp ?? 1)));
+    const palette = [darkenSkinColor(skin.color, lifeRatio)];
+    if (skin.accent) {
+      palette.push(skin.accent);
+    }
+    palette.push("rgba(238,248,255,0.82)");
+    return palette;
+  }
+
+  function addShopPreviewBreakParticles(demo, skin, block) {
+    const shardCount = 18;
+    const palette = previewBrickPalette(skin, block);
+    const centerX = block.x + block.size / 2;
+    const centerY = block.y + block.size / 2;
+    for (let index = 0; index < shardCount; index += 1) {
+      const column = index % 6;
+      const row = Math.floor(index / 6);
+      const shardX = block.x + (column + 0.5) * (block.size / 6);
+      const shardY = block.y + (row + 0.5) * (block.size / 3);
+      const angle = Math.atan2(shardY - centerY, shardX - centerX) + (Math.random() - 0.5) * 0.75;
+      const speed = 95 + Math.random() * 150;
+      demo.particles.push({
+        x: shardX,
+        y: shardY,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed - 58,
+        life: GAME_CONFIG.effects.particleLife * 1.65,
+        maxLife: GAME_CONFIG.effects.particleLife * 1.65,
+        color: palette[Math.floor(Math.random() * palette.length)],
+        size: Math.max(4, block.size * (0.08 + Math.random() * 0.05)),
+        rotation: Math.random() * Math.PI,
+        rotationSpeed: (Math.random() - 0.5) * 9
+      });
+    }
+  }
+
+  function collidePreviewBallWithBlock(ball, block) {
+    const closestX = clamp(ball.x, block.x, block.x + block.size);
+    const closestY = clamp(ball.y, block.y, block.y + block.size);
+    const dx = ball.x - closestX;
+    const dy = ball.y - closestY;
+    const distanceSquared = dx * dx + dy * dy;
+    if (distanceSquared > ball.radius * ball.radius) {
+      return false;
+    }
+
+    const distance = Math.sqrt(distanceSquared) || 1;
+    let normalX = dx / distance;
+    let normalY = dy / distance;
+    if (distanceSquared === 0) {
+      const centerX = block.x + block.size / 2;
+      const centerY = block.y + block.size / 2;
+      const offsetX = ball.x - centerX;
+      const offsetY = ball.y - centerY;
+      if (Math.abs(offsetX) > Math.abs(offsetY)) {
+        normalX = Math.sign(offsetX) || 1;
+        normalY = 0;
+      } else {
+        normalX = 0;
+        normalY = Math.sign(offsetY) || 1;
+      }
+    }
+    const dot = ball.vx * normalX + ball.vy * normalY;
+    if (dot < 0) {
+      ball.vx -= 2 * dot * normalX;
+      ball.vy -= 2 * dot * normalY;
+    }
+    ball.x += normalX * Math.max(1, ball.radius - distance + 0.5);
+    ball.y += normalY * Math.max(1, ball.radius - distance + 0.5);
+    ball.cooldown = 0.06;
+    return true;
+  }
+
+  function updateShopBrickPreviewDemo(demo, skin, area) {
+    const now = Date.now();
+    if (now - demo.startedAt >= SHOP_BRICK_PREVIEW_REPLAY_MS) {
+      shopPreview.demo = createShopBrickPreviewDemo(area);
+      return;
+    }
+    const rawDelta = (now - demo.lastAt) / 1000;
+    const delta = clamp(rawDelta, 0, 0.033);
+    demo.lastAt = now;
+    const left = area.previewX + 10;
+    const top = area.previewY + 10;
+    const right = area.previewX + area.previewWidth - 10;
+    const bottom = area.previewY + area.previewHeight - 10;
+
+    for (const particle of demo.particles) {
+      particle.x += particle.vx * delta;
+      particle.y += particle.vy * delta;
+      particle.vy += 180 * delta;
+      particle.rotation += particle.rotationSpeed * delta;
+      particle.life -= delta;
+    }
+    demo.particles = demo.particles.filter((particle) => particle.life > 0);
+
+    for (const block of demo.blocks) {
+      block.hitFlash = Math.max(0, block.hitFlash - delta);
+    }
+
+    for (const ball of demo.balls) {
+      ball.cooldown = Math.max(0, ball.cooldown - delta);
+      ball.x += ball.vx * delta;
+      ball.y += ball.vy * delta;
+
+      if (ball.x - ball.radius < left) {
+        ball.x = left + ball.radius;
+        ball.vx = Math.abs(ball.vx);
+      } else if (ball.x + ball.radius > right) {
+        ball.x = right - ball.radius;
+        ball.vx = -Math.abs(ball.vx);
+      }
+      if (ball.y - ball.radius < top) {
+        ball.y = top + ball.radius;
+        ball.vy = Math.abs(ball.vy);
+      } else if (ball.y + ball.radius > bottom) {
+        ball.y = bottom - ball.radius;
+        ball.vy = -Math.abs(ball.vy);
+      }
+
+      if (ball.cooldown <= 0) {
+        for (let index = demo.blocks.length - 1; index >= 0; index -= 1) {
+          const block = demo.blocks[index];
+          if (!collidePreviewBallWithBlock(ball, block)) {
+            continue;
+          }
+          block.hp -= 1;
+          block.hitFlash = GAME_CONFIG.effects.hitFlashTime;
+          if (block.hp <= 0) {
+            addShopPreviewBreakParticles(demo, skin, block);
+            demo.blocks.splice(index, 1);
+          }
+          break;
+        }
+      }
+    }
+
+    if (demo.blocks.length === 0 && demo.resetAt === 0) {
+      demo.resetAt = now + 850;
+    }
+    if (demo.resetAt > 0 && now >= demo.resetAt) {
+      shopPreview.demo = createShopBrickPreviewDemo(area);
+    }
+  }
+
+  function drawShopPreviewParticles(context, particles) {
+    for (const particle of particles) {
+      const alpha = particle.life / particle.maxLife;
+      context.save();
+      context.translate(particle.x, particle.y);
+      context.rotate(particle.rotation);
+      context.globalAlpha = alpha;
+      context.fillStyle = particle.color ?? "#a8efff";
+      context.fillRect(-particle.size / 2, -particle.size / 2, particle.size, particle.size);
+      context.strokeStyle = "rgba(255,255,255,0.45)";
+      context.lineWidth = 1;
+      context.strokeRect(-particle.size / 2, -particle.size / 2, particle.size, particle.size);
+      context.restore();
+    }
+  }
+
+  function drawShopBrickPreview(context, skin, area) {
+    if (
+      !shopPreview.demo ||
+      shopPreview.demo.width !== area.previewWidth ||
+      shopPreview.demo.height !== area.previewHeight
+    ) {
+      shopPreview.demo = createShopBrickPreviewDemo(area);
+    }
+    updateShopBrickPreviewDemo(shopPreview.demo, skin, area);
+    const demo = shopPreview.demo;
+    const rgb = parseHexColor(skin.color);
+
+    context.save();
+    roundedRect(context, area.previewX, area.previewY, area.previewWidth, area.previewHeight, 10);
+    context.fillStyle = "rgba(9,13,18,0.68)";
+    context.fill();
+    context.strokeStyle = "rgba(255,255,255,0.1)";
+    context.lineWidth = 1;
+    context.stroke();
+    context.beginPath();
+    context.rect(area.previewX, area.previewY, area.previewWidth, area.previewHeight);
+    context.clip();
+
+    for (const block of demo.blocks) {
+      const lifeRatio = block.hp / Math.max(1, block.maxHp);
+      const fill = rgb
+        ? darkenParsedSkinColor(rgb, lifeRatio)
+        : darkenSkinColor(skin.color, lifeRatio);
+      drawBrickSample(context, block.x, block.y, block.size, skin, { fill, lifeRatio });
+      if (block.hitFlash > 0) {
+        context.fillStyle = `rgba(255,255,255,${Math.min(0.55, block.hitFlash * 3.2)})`;
+        context.fillRect(block.x, block.y, block.size, block.size);
+      }
+      if (!skin.borderless) {
+        context.strokeStyle = "rgba(255,255,255,0.16)";
+        context.lineWidth = 2;
+        context.strokeRect(block.x, block.y, block.size, block.size);
+      }
+      drawShopPreviewBlockHp(context, block, skin);
+    }
+
+    drawShopPreviewParticles(context, demo.particles);
+    for (const ball of demo.balls) {
+      drawPreviewBall(context, ball.x, ball.y, ball.radius, { color: "#eff9ff" });
+    }
+    context.restore();
+  }
+
+  function drawShopPreviewBlockHp(context, block, skin) {
+    context.fillStyle = "#eef8ff";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    if (skin?.hpBadge === "bottom-right") {
+      const fontSize = Math.max(11, Math.min(16, block.size * 0.28));
+      const textX = block.x + block.size * 0.78;
+      const textY = block.y + block.size * 0.82;
+      context.font = `900 ${fontSize}px sans-serif`;
+      context.lineJoin = "round";
+      context.strokeStyle = "rgba(8,18,12,0.32)";
+      context.lineWidth = Math.max(1, block.size * 0.02);
+      context.strokeText(String(block.hp), textX, textY);
+      context.fillStyle = "rgba(255,248,223,0.68)";
+      context.fillText(String(block.hp), textX, textY);
+      return;
+    }
+    if (skin?.hpBadge === "top-left") {
+      const textX = block.x + block.size * 0.16;
+      const textY = block.y + block.size * 0.16;
+      context.fillStyle = "#eef8ff";
+      context.font = `800 ${Math.max(12, Math.min(17, block.size * 0.29))}px sans-serif`;
+      context.fillText(String(block.hp), textX, textY);
+      return;
+    }
+    if (skin?.hpBadge === "corner") {
+      const badgeRadius = Math.max(9, block.size * 0.2);
+      const badgeX = block.x + block.size - badgeRadius * 0.72;
+      const badgeY = block.y + badgeRadius * 0.72;
+      context.beginPath();
+      context.arc(badgeX, badgeY, badgeRadius, 0, Math.PI * 2);
+      context.fillStyle = "rgba(13,22,18,0.74)";
+      context.fill();
+      context.strokeStyle = "rgba(255,255,255,0.7)";
+      context.lineWidth = Math.max(1, block.size * 0.018);
+      context.stroke();
+      context.fillStyle = "#eef8ff";
+      context.font = `800 ${Math.max(12, Math.min(18, block.size * 0.28))}px sans-serif`;
+      context.fillText(String(block.hp), badgeX, badgeY + 1);
+      return;
+    }
+    context.font = `800 ${Math.max(18, block.size * 0.38)}px sans-serif`;
+    context.fillText(String(block.hp), block.x + block.size / 2, block.y + block.size / 2 + 1);
+  }
+
+  function drawShopPreviewPopup(context) {
+    if (!shopPreview) {
+      return;
+    }
+    const skin = GAME_CONFIG.skins[shopPreview.category].find((candidate) => candidate.id === shopPreview.skinId);
+    if (!skin) {
+      return;
+    }
+    const popup = shopPreviewLayout();
+    const owned = isSkinOwned(shopPreview.category, skin.id);
+    const actionButton = currentButtons().find((button) => button.id === "shop-preview-action");
+    const cancelButton = currentButtons().find((button) => button.id === "shop-preview-cancel");
+    const closeButton = currentButtons().find((button) => button.id === "shop-preview-close");
+
+    context.save();
+    context.fillStyle = "rgba(0,0,0,0.42)";
+    context.fillRect(0, 0, screenWidth, screenHeight);
+    roundedRect(context, popup.x, popup.y, popup.width, popup.height, 12);
+    context.fillStyle = "#171717";
+    context.fill();
     context.strokeStyle = "rgba(255,255,255,0.18)";
-    context.lineWidth = 2;
-    context.strokeRect(x, y, size, size);
+    context.lineWidth = 1;
+    context.stroke();
+
+    context.fillStyle = "#fbfbfb";
+    context.font = popupTitleFont(24, 800);
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(skin.name ?? skin.id.replace(`${shopPreview.category}-`, ""), popup.x + popup.width / 2, popup.y + 42);
+    drawCloseButton(context, closeButton);
+
+    drawShopBrickPreview(context, skin, popup);
+
+    drawButton(context, cancelButton, texts.noThanks);
+    drawShopPreviewActionButton(context, actionButton, owned, skin.price);
+    context.restore();
+  }
+
+  function drawShopPreviewActionButton(context, button, owned, price) {
+    if (!button) {
+      return;
+    }
+    if (owned) {
+      drawButton(context, button, texts.use, true);
+      return;
+    }
+
+    drawButton(context, button, "", true);
+
+    const iconSize = 20;
+    const buyText = texts.buy;
+    const priceText = String(price);
+    const textIconGap = 8;
+    const priceGap = 5;
+    const centerY = button.y + button.height / 2;
+
+    context.save();
+    context.fillStyle = "#1d1d1d";
+    context.textBaseline = "middle";
+    context.textAlign = "left";
+    context.font = "700 20px sans-serif";
+    const buyWidth = context.measureText(buyText).width;
+    const priceWidth = context.measureText(priceText).width;
+    const totalWidth = buyWidth + textIconGap + iconSize + priceGap + priceWidth;
+    let cursorX = button.x + (button.width - totalWidth) / 2;
+
+    context.fillText(buyText, cursorX, centerY + 1);
+    cursorX += buyWidth + textIconGap;
+    if (coinIconAsset.loaded && coinIconAsset.image) {
+      context.drawImage(coinIconAsset.image, cursorX, centerY - iconSize / 2, iconSize, iconSize);
+    } else {
+      context.beginPath();
+      context.arc(cursorX + iconSize / 2, centerY, iconSize / 2, 0, Math.PI * 2);
+      context.fillStyle = "#facc15";
+      context.fill();
+      context.fillStyle = "#1d1d1d";
+    }
+    cursorX += iconSize + priceGap;
+    context.fillText(priceText, cursorX, centerY + 1);
     context.restore();
   }
 
@@ -3606,6 +4270,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     context.font = "16px sans-serif";
     context.textAlign = "center";
     context.fillText(shopMessage, screenWidth / 2, panel.y + panel.height - 8);
+
+    drawShopPreviewPopup(context);
   }
 
   function drawToggle(context, button, enabled) {
@@ -3737,6 +4403,41 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         iconY + iconSize + (button.iconLabelGap ?? 5) + (button.labelFontSize ?? 13)
       );
     }
+    const shopButton = navButtons.find((button) => button.id === "shop");
+    if (shopButton && hasUnownedNewSkin()) {
+      drawShopNewCallout(context, shopButton);
+    }
+    context.restore();
+  }
+
+  function drawShopNewCallout(context, button) {
+    const text = "皮肤上新啦";
+    const centerX = button.x + button.width / 2;
+    const bubbleWidth = clamp(button.width * 0.86, 92, 116);
+    const bubbleHeight = 30;
+    const bubbleX = centerX - bubbleWidth / 2;
+    const bubbleY = button.y - bubbleHeight - 8;
+    const tailX = centerX - 10;
+    const tailY = bubbleY + bubbleHeight - 1;
+
+    context.save();
+    roundedRect(context, bubbleX, bubbleY, bubbleWidth, bubbleHeight, 8);
+    context.fillStyle = "#ef4444";
+    context.fill();
+
+    context.beginPath();
+    context.moveTo(tailX, tailY);
+    context.lineTo(tailX + 14, tailY);
+    context.lineTo(tailX - 4, tailY + 12);
+    context.closePath();
+    context.fillStyle = "#ef4444";
+    context.fill();
+
+    context.fillStyle = "#ffffff";
+    context.font = "900 14px sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(text, centerX, bubbleY + bubbleHeight / 2 + 1);
     context.restore();
   }
 
@@ -5203,9 +5904,47 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
   }
 
+  function drawRewardChoiceButton(context, button, label, iconAsset, fill, textColor) {
+    if (!button) {
+      return;
+    }
+
+    roundedRect(context, button.x, button.y, button.width, button.height, 24);
+    if (typeof fill === "function") {
+      fill(context, button);
+    } else {
+      context.fillStyle = fill;
+    }
+    context.fill();
+
+    const iconSize = button.width < 130 ? 20 : 24;
+    const gap = button.width < 130 ? 5 : 8;
+    let fontSize = button.width < 130 ? 17 : 20;
+    context.font = `700 ${fontSize}px sans-serif`;
+    let textWidth = context.measureText(label).width;
+    const maxTextWidth = button.width - iconSize - gap - 18;
+    if (textWidth > maxTextWidth) {
+      fontSize = Math.max(14, Math.floor(fontSize * (maxTextWidth / textWidth)));
+      context.font = `700 ${fontSize}px sans-serif`;
+      textWidth = context.measureText(label).width;
+    }
+
+    const contentX = button.x + (button.width - iconSize - gap - textWidth) / 2;
+    const centerY = button.y + button.height / 2;
+    if (iconAsset.loaded && iconAsset.image) {
+      context.drawImage(iconAsset.image, contentX, centerY - iconSize / 2, iconSize, iconSize);
+    }
+    context.fillStyle = textColor;
+    context.textAlign = "left";
+    context.textBaseline = "middle";
+    context.fillText(label, contentX + iconSize + gap, centerY + 1);
+  }
+
   function drawBombToolPanel(context, panel) {
     const mode = bombToolPanelMode();
     const confirmButton = currentButtons().find((button) => button.id === "bomb-tool-confirm");
+    const shareButton = currentButtons().find((button) => button.id === "bomb-tool-share");
+    const adButton = currentButtons().find((button) => button.id === "bomb-tool-ad");
     const centerX = panel.x + panel.width / 2;
     drawBombToolDemo(context, panel);
 
@@ -5229,39 +5968,17 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       context.fillText(
         bombToolMessage,
         centerX,
-        confirmButton ? confirmButton.y - 16 : panel.y + panel.height - 42
+        (confirmButton ?? shareButton)?.y ? (confirmButton ?? shareButton).y - 16 : panel.y + panel.height - 42
       );
     }
 
-    if (!confirmButton) {
+    if (mode === "retrieve") {
+      drawRewardChoiceButton(context, shareButton, texts.bombShareConfirm, shareIconAsset, "#f2b400", "#1d1d1d");
+      drawRewardChoiceButton(context, adButton, texts.bombAdConfirm, adVideoIconAsset, "#f2b400", "#1d1d1d");
       return;
     }
-    if (mode === "share" || mode === "ad") {
-      roundedRect(
-        context,
-        confirmButton.x,
-        confirmButton.y,
-        confirmButton.width,
-        confirmButton.height,
-        24
-      );
-      context.fillStyle = "#f2b400";
-      context.fill();
-      const label = mode === "share" ? texts.bombShareConfirm : texts.bombAdConfirm;
-      const iconSize = 24;
-      const gap = 8;
-      context.font = "700 20px sans-serif";
-      const textWidth = context.measureText(label).width;
-      const contentX = confirmButton.x + (confirmButton.width - iconSize - gap - textWidth) / 2;
-      const centerY = confirmButton.y + confirmButton.height / 2;
-      const iconAsset = mode === "share" ? shareIconAsset : adVideoIconAsset;
-      if (iconAsset.loaded && iconAsset.image) {
-        context.drawImage(iconAsset.image, contentX, centerY - iconSize / 2, iconSize, iconSize);
-      }
-      context.fillStyle = "#1d1d1d";
-      context.textAlign = "left";
-      context.textBaseline = "middle";
-      context.fillText(label, contentX + iconSize + gap, centerY + 1);
+
+    if (!confirmButton) {
       return;
     }
     drawButton(context, confirmButton, texts.bombConfirm, true);
@@ -5270,6 +5987,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   function drawFreezeToolPanel(context, panel) {
     const mode = freezeToolPanelMode();
     const confirmButton = currentButtons().find((button) => button.id === "freeze-tool-confirm");
+    const shareButton = currentButtons().find((button) => button.id === "freeze-tool-share");
+    const adButton = currentButtons().find((button) => button.id === "freeze-tool-ad");
     const centerX = panel.x + panel.width / 2;
     drawFreezeToolDemo(context, panel);
 
@@ -5293,39 +6012,17 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       context.fillText(
         freezeToolMessage,
         centerX,
-        confirmButton ? confirmButton.y - 16 : panel.y + panel.height - 42
+        (confirmButton ?? shareButton)?.y ? (confirmButton ?? shareButton).y - 16 : panel.y + panel.height - 42
       );
     }
 
-    if (!confirmButton) {
+    if (mode === "retrieve") {
+      drawRewardChoiceButton(context, shareButton, texts.freezeShareConfirm, shareIconAsset, "#67e8f9", "#10243d");
+      drawRewardChoiceButton(context, adButton, texts.freezeAdConfirm, adVideoIconAsset, "#67e8f9", "#10243d");
       return;
     }
-    if (mode === "share" || mode === "ad") {
-      roundedRect(
-        context,
-        confirmButton.x,
-        confirmButton.y,
-        confirmButton.width,
-        confirmButton.height,
-        24
-      );
-      context.fillStyle = "#67e8f9";
-      context.fill();
-      const label = mode === "share" ? texts.freezeShareConfirm : texts.freezeAdConfirm;
-      const iconSize = 24;
-      const gap = 8;
-      context.font = "700 20px sans-serif";
-      const textWidth = context.measureText(label).width;
-      const contentX = confirmButton.x + (confirmButton.width - iconSize - gap - textWidth) / 2;
-      const centerY = confirmButton.y + confirmButton.height / 2;
-      const iconAsset = mode === "share" ? shareIconAsset : adVideoIconAsset;
-      if (iconAsset.loaded && iconAsset.image) {
-        context.drawImage(iconAsset.image, contentX, centerY - iconSize / 2, iconSize, iconSize);
-      }
-      context.fillStyle = "#10243d";
-      context.textAlign = "left";
-      context.textBaseline = "middle";
-      context.fillText(label, contentX + iconSize + gap, centerY + 1);
+
+    if (!confirmButton) {
       return;
     }
     drawButton(context, confirmButton, texts.freezeConfirm, true);
@@ -5334,6 +6031,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   function drawRageToolPanel(context, panel) {
     const mode = rageToolPanelMode();
     const confirmButton = currentButtons().find((button) => button.id === "rage-tool-confirm");
+    const shareButton = currentButtons().find((button) => button.id === "rage-tool-share");
+    const adButton = currentButtons().find((button) => button.id === "rage-tool-ad");
     const centerX = panel.x + panel.width / 2;
     drawRageToolDemo(context, panel);
 
@@ -5357,47 +6056,23 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       context.fillText(
         rageToolMessage,
         centerX,
-        confirmButton ? confirmButton.y - 16 : panel.y + panel.height - 42
+        (confirmButton ?? shareButton)?.y ? (confirmButton ?? shareButton).y - 16 : panel.y + panel.height - 42
       );
     }
 
-    if (!confirmButton) {
+    if (mode === "retrieve") {
+      const rageFill = (targetContext, button) => {
+        const buttonGradient = targetContext.createLinearGradient(button.x, button.y, button.x + button.width, button.y);
+        buttonGradient.addColorStop(0, "#ef2d1f");
+        buttonGradient.addColorStop(1, "#ff8a1f");
+        targetContext.fillStyle = buttonGradient;
+      };
+      drawRewardChoiceButton(context, shareButton, texts.rageShareConfirm, shareIconAsset, rageFill, "#ffffff");
+      drawRewardChoiceButton(context, adButton, texts.rageAdConfirm, adVideoIconAsset, rageFill, "#ffffff");
       return;
     }
-    if (mode === "share" || mode === "ad") {
-      roundedRect(
-        context,
-        confirmButton.x,
-        confirmButton.y,
-        confirmButton.width,
-        confirmButton.height,
-        24
-      );
-      const buttonGradient = context.createLinearGradient(
-        confirmButton.x,
-        confirmButton.y,
-        confirmButton.x + confirmButton.width,
-        confirmButton.y
-      );
-      buttonGradient.addColorStop(0, "#ef2d1f");
-      buttonGradient.addColorStop(1, "#ff8a1f");
-      context.fillStyle = buttonGradient;
-      context.fill();
-      const label = mode === "share" ? texts.rageShareConfirm : texts.rageAdConfirm;
-      const iconSize = 24;
-      const gap = 8;
-      context.font = "700 20px sans-serif";
-      const textWidth = context.measureText(label).width;
-      const contentX = confirmButton.x + (confirmButton.width - iconSize - gap - textWidth) / 2;
-      const centerY = confirmButton.y + confirmButton.height / 2;
-      const iconAsset = mode === "share" ? shareIconAsset : adVideoIconAsset;
-      if (iconAsset.loaded && iconAsset.image) {
-        context.drawImage(iconAsset.image, contentX, centerY - iconSize / 2, iconSize, iconSize);
-      }
-      context.fillStyle = "#ffffff";
-      context.textAlign = "left";
-      context.textBaseline = "middle";
-      context.fillText(label, contentX + iconSize + gap, centerY + 1);
+
+    if (!confirmButton) {
       return;
     }
     drawButton(context, confirmButton, texts.rageConfirm, true);
@@ -6722,7 +7397,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       return;
     }
 
-    if (screen === "menu" && overlay === "shop") {
+    if (screen === "menu" && overlay === "shop" && !shopPreview) {
       shopDragStartY = point.y;
       shopDragStartScrollY = shopScrollY;
       shopDragging = false;
@@ -6790,7 +7465,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       return;
     }
 
-    if (screen === "menu" && overlay === "shop" && touchStart) {
+    if (screen === "menu" && overlay === "shop" && !shopPreview && touchStart) {
       const point = getTouchPoint(event);
       if (!point) {
         return;

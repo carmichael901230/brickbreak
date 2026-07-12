@@ -121,6 +121,7 @@ let hasStartedRun = false;
 let shopCategory = "brick";
 let pendingPurchase = null;
 let shopBannerTimer = null;
+let viewedNewSkinIds = new Set(storage.loadViewedNewSkins());
 let pendingCheckIn = null;
 let checkInClaimAnimating = false;
 
@@ -193,6 +194,7 @@ function syncHud() {
   menuHeartValue.textContent = String(state.heartCount);
   heartCounter.classList.toggle("is-hidden", appScreen !== "game");
   menuHeartCounter.classList.toggle("is-hidden", appScreen !== "menu");
+  shopButton.classList.toggle("has-new-skin", hasUnownedNewSkin());
   speedButton.classList.toggle("is-hidden", !state.speedUpAvailable || isSimulationPaused());
   gameOverSummary.textContent = `You made it to round ${state.round}.`;
 }
@@ -349,6 +351,26 @@ function isOwned(category, skinId) {
   return game.getState().skins.owned[category].includes(skinId);
 }
 
+function hasUnownedNewSkin() {
+  return Object.entries(GAME_CONFIG.skins).some(([category, skins]) =>
+    skins.some((skin) => isNewSkinHighlightVisible(category, skin))
+  );
+}
+
+function isNewSkinHighlightVisible(category, skin) {
+  return Boolean(skin.isNew && !skin.default && !viewedNewSkinIds.has(skin.id) && !isOwned(category, skin.id));
+}
+
+function markNewSkinViewed(skin) {
+  if (!skin?.isNew || viewedNewSkinIds.has(skin.id)) {
+    return;
+  }
+
+  viewedNewSkinIds = new Set([...viewedNewSkinIds, skin.id]);
+  storage.saveViewedNewSkins([...viewedNewSkinIds]);
+  syncHud();
+}
+
 function renderShop() {
   const state = game.getState();
   const skins = GAME_CONFIG.skins[shopCategory];
@@ -366,6 +388,10 @@ function renderShop() {
     item.className = "skin-item";
     item.type = "button";
     item.dataset.skinId = skin.id;
+    if (isNewSkinHighlightVisible(shopCategory, skin)) {
+      item.classList.add("is-new");
+      item.dataset.badge = "新";
+    }
     item.setAttribute("aria-label", skin.id);
 
     const sample = document.createElement("span");
@@ -375,6 +401,12 @@ function renderShop() {
     sample.style.setProperty("--skin-accent", skin.accent ?? "rgba(255,255,255,0.72)");
     if (skin.pattern) {
       sample.dataset.pattern = skin.pattern;
+    }
+    if (skin.shape) {
+      sample.dataset.shape = skin.shape;
+    }
+    if (skin.borderless) {
+      sample.dataset.borderless = "true";
     }
     const storeImage = skin.storeImage ?? skin.image;
     if (storeImage) {
@@ -439,6 +471,7 @@ function handleSkinTap(skinId) {
 
   const state = game.getState();
   const skins = structuredClone(state.skins);
+  markNewSkinViewed(skin);
   if (skin.default || skins.owned[shopCategory].includes(skin.id)) {
     skins.selected[shopCategory] = skin.default ? null : skin.id;
     game.setSkins(skins);

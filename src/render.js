@@ -82,10 +82,10 @@ function createImageAsset(src) {
   return asset;
 }
 
-function createSkinAssetMap(config, providedAssets = {}) {
+function createSkinAssetMap(config, type, imageField, providedAssets = {}) {
   const assets = { ...providedAssets };
-  for (const skin of config.skins?.ball ?? []) {
-    const image = skin.gameImage ?? skin.image;
+  for (const skin of config.skins?.[type] ?? []) {
+    const image = skin[imageField] ?? skin.image;
     if (image && !assets[image]) {
       assets[image] = createImageAsset(image);
     }
@@ -116,7 +116,8 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
   const showRoundBanner = options.showRoundBanner !== false;
   const coinAsset = options.coinAsset || createImageAsset("src/assets/pic/dollar.png");
   const heartAsset = options.heartAsset || createImageAsset("src/assets/pic/heart.png");
-  const ballSkinAssets = createSkinAssetMap(config, options.ballSkinAssets);
+  const ballSkinAssets = createSkinAssetMap(config, "ball", "gameImage", options.ballSkinAssets);
+  const brickSkinOverlayAssets = createSkinAssetMap(config, "brick", "overlayImage", options.brickSkinOverlayAssets);
 
   function drawScene(state, resolveEntityPosition) {
     drawBackground();
@@ -288,15 +289,13 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
         context.fillRect(visibleRect.x, visibleRect.y, visibleRect.size, visibleRect.size);
       }
 
-      context.strokeStyle = "rgba(255,255,255,0.16)";
-      context.lineWidth = 2;
-      context.strokeRect(visibleRect.x, visibleRect.y, visibleRect.size, visibleRect.size);
+      if (!brickSkin?.borderless) {
+        context.strokeStyle = "rgba(255,255,255,0.16)";
+        context.lineWidth = 2;
+        context.strokeRect(visibleRect.x, visibleRect.y, visibleRect.size, visibleRect.size);
+      }
 
-      context.fillStyle = "#eef8ff";
-      context.font = "700 36px 'Segoe UI'";
-      context.textAlign = "center";
-      context.textBaseline = "middle";
-      context.fillText(String(block.hp), visibleRect.x + visibleRect.size / 2, visibleRect.y + visibleRect.size / 2 + 2);
+      drawBlockHpText(visibleRect, block.hp, brickSkin);
 
       if (state.freezeActive) {
         const { x: brickX, y: brickY, size } = visibleRect;
@@ -319,14 +318,56 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
         context.moveTo(brickX + size * 0.62, brickY + size * 0.1);
         context.lineTo(brickX + size * 0.78, brickY + size * 0.3);
         context.stroke();
-        context.fillStyle = "#f7fdff";
-        context.font = "700 36px 'Segoe UI'";
-        context.textAlign = "center";
-        context.textBaseline = "middle";
-        context.fillText(String(block.hp), brickX + size / 2, brickY + size / 2 + 2);
+        drawBlockHpText(visibleRect, block.hp, brickSkin, "#f7fdff");
       }
       context.restore();
     }
+  }
+
+  function drawBlockHpText(rect, hp, skin, color = "#eef8ff") {
+    const { x, y, size } = rect;
+    context.fillStyle = color;
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    if (skin?.hpBadge === "bottom-right") {
+      const fontSize = Math.max(16, Math.min(25, size * 0.28));
+      const textX = x + size * 0.78;
+      const textY = y + size * 0.82;
+      context.font = `900 ${fontSize}px 'Segoe UI'`;
+      context.lineJoin = "round";
+      context.strokeStyle = "rgba(8,18,12,0.32)";
+      context.lineWidth = Math.max(1.5, size * 0.02);
+      context.strokeText(String(hp), textX, textY);
+      context.fillStyle = "rgba(255,248,223,0.68)";
+      context.fillText(String(hp), textX, textY);
+      return;
+    }
+    if (skin?.hpBadge === "top-left") {
+      const textX = x + size * 0.16;
+      const textY = y + size * 0.16;
+      context.fillStyle = color;
+      context.font = `800 ${Math.max(16, Math.min(25, size * 0.29))}px 'Segoe UI'`;
+      context.fillText(String(hp), textX, textY);
+      return;
+    }
+    if (skin?.hpBadge === "corner") {
+      const badgeRadius = Math.max(13, size * 0.2);
+      const badgeX = x + size - badgeRadius * 0.72;
+      const badgeY = y + badgeRadius * 0.72;
+      context.beginPath();
+      context.arc(badgeX, badgeY, badgeRadius, 0, Math.PI * 2);
+      context.fillStyle = "rgba(13,22,18,0.74)";
+      context.fill();
+      context.strokeStyle = "rgba(255,255,255,0.7)";
+      context.lineWidth = Math.max(1, size * 0.018);
+      context.stroke();
+      context.fillStyle = color;
+      context.font = `800 ${Math.max(15, Math.min(24, size * 0.28))}px 'Segoe UI'`;
+      context.fillText(String(hp), badgeX, badgeY + 1);
+      return;
+    }
+    context.font = "700 36px 'Segoe UI'";
+    context.fillText(String(hp), x + size / 2, y + size / 2 + 2);
   }
 
   function drawBrickSkin(rect, fill, skin, lifeRatio) {
@@ -338,9 +379,19 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
 
     context.save();
     context.fillStyle = fill;
-    context.fillRect(x, y, size, size);
     context.beginPath();
-    context.rect(x, y, size, size);
+    if (skin?.shape === "rounded") {
+      drawRoundedRect(context, x, y, size, size, size * 0.14);
+    } else {
+      context.rect(x, y, size, size);
+    }
+    context.fill();
+    context.beginPath();
+    if (skin?.shape === "rounded") {
+      drawRoundedRect(context, x, y, size, size, size * 0.14);
+    } else {
+      context.rect(x, y, size, size);
+    }
     context.clip();
 
     context.globalAlpha = 0.55 + lifeRatio * 0.28;
@@ -461,6 +512,11 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
     shine.addColorStop(1, "rgba(0,0,0,0.18)");
     context.fillStyle = shine;
     context.fillRect(x, y, size, size);
+
+    const overlay = skin?.overlayImage ? brickSkinOverlayAssets[skin.overlayImage] : null;
+    if (overlay?.loaded && overlay.image) {
+      context.drawImage(overlay.image, x, y, size, size);
+    }
     context.restore();
   }
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Create Block Skin"
+  short_description: "Create transparent block skin overlays"
+  default_prompt: "Use $create-block-skin to create a transparent overlay block skin for this repo from a screenshot."
