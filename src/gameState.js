@@ -500,7 +500,6 @@ export function createGameController({
     const snapshot = {
       round: gameState.round,
       score: gameState.score,
-      skins: gameState.skins,
       ballsOwned: gameState.ballsOwned,
       ballsLaunched: state === "aiming" ? 0 : gameState.ballsLaunched,
       returnedBalls: state === "aiming" ? 0 : gameState.returnedBalls,
@@ -550,7 +549,7 @@ export function createGameController({
     nextState.round = Math.max(1, Math.floor(restoreNumber(snapshot.round, nextState.round)));
     nextState.score = Math.max(0, Math.floor(restoreNumber(snapshot.score, nextState.score)));
     nextState.bestScore = Math.max(0, Math.floor(gameState.bestScore));
-    nextState.skins = normalizeSkins(snapshot.skins ?? nextState.skins, config);
+    nextState.skins = normalizeSkins(gameState.skins, config);
     nextState.ballsOwned = Math.max(1, Math.floor(restoreNumber(snapshot.ballsOwned, nextState.ballsOwned)));
     nextState.ballsLaunched = Math.max(0, Math.floor(restoreNumber(snapshot.ballsLaunched, nextState.ballsLaunched)));
     nextState.returnedBalls = Math.max(0, Math.floor(restoreNumber(snapshot.returnedBalls, nextState.returnedBalls)));

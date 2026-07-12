@@ -106,18 +106,49 @@ test("game state snapshot can be exported and restored", () => {
   const snapshot = game.exportSnapshot();
   assert.ok(snapshot);
   assert.equal(Object.hasOwn(snapshot, "bestScore"), false);
+  assert.equal(Object.hasOwn(snapshot, "skins"), false);
 
   const restored = createGameController({
+    initialSkins: {
+      owned: {
+        brick: ["brick-coral"],
+        ball: ["ball-gold"]
+      },
+      selected: {
+        brick: "brick-coral",
+        ball: "ball-gold"
+      }
+    },
     boardGenerator: createBoardGenerator([{ blocks: [], pickups: [] }]),
     audioBus: createAudioBus()
   });
   restored.getState().bestScore = 7;
+  snapshot.skins = {
+    owned: {
+      brick: ["brick-sun"],
+      ball: ["ball-ice"]
+    },
+    selected: {
+      brick: "brick-sun",
+      ball: "ball-ice"
+    }
+  };
 
   assert.equal(restored.importSnapshot(snapshot), true);
   assert.deepEqual(restored.getState().blocks, game.getState().blocks);
   assert.equal(restored.getState().state, game.getState().state);
   assert.equal(restored.getState().round, game.getState().round);
   assert.equal(restored.getState().bestScore, 7);
+  assert.deepEqual(restored.getState().skins, {
+    owned: {
+      brick: ["brick-coral"],
+      ball: ["ball-gold"]
+    },
+    selected: {
+      brick: "brick-coral",
+      ball: "ball-gold"
+    }
+  });
 });
 
 test("new rounds visually slide existing blocks down into their advanced rows", () => {

@@ -54,6 +54,21 @@ function normalizeCheckIn(value) {
   };
 }
 
+function omitProgressSkins(progress) {
+  if (!progress || typeof progress !== "object") {
+    return progress;
+  }
+
+  const snapshot = progress.snapshot && typeof progress.snapshot === "object"
+    ? { ...progress.snapshot }
+    : progress.snapshot;
+  if (snapshot && typeof snapshot === "object") {
+    delete snapshot.skins;
+  }
+
+  return { ...progress, snapshot };
+}
+
 export function createStorageAdapter(storage = globalThis.localStorage) {
   return {
     loadSettings() {
@@ -170,7 +185,7 @@ export function createStorageAdapter(storage = globalThis.localStorage) {
         return;
       }
 
-      storage.setItem(STORAGE_KEYS.gameProgress, JSON.stringify(progress));
+      storage.setItem(STORAGE_KEYS.gameProgress, JSON.stringify(omitProgressSkins(progress)));
     },
 
     loadDailyCheckIn() {

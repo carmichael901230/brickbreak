@@ -97,7 +97,7 @@ export const GAME_CONFIG = {
       {
         id: "brick-brown-fang",
         name: "\u68d5\u7259\u5c0f\u602a\u7816",
-        color: "#6b3b24",
+        color: "#8a5638",
         shape: "rounded",
         borderless: true,
         overlayImage: "src/assets/pic/bricks/brown-fang-overlay.png",

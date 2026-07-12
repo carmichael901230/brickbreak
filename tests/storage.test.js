@@ -143,12 +143,27 @@ test("storage adapter persists and clears saved game progress", () => {
   const progress = {
     version: 1,
     snapshot: {
-      round: 4
+      round: 4,
+      skins: {
+        owned: {
+          brick: ["brick-sun"],
+          ball: ["ball-ice"]
+        },
+        selected: {
+          brick: "brick-sun",
+          ball: "ball-ice"
+        }
+      }
     }
   };
 
   adapter.saveGameProgress(progress);
-  assert.deepEqual(adapter.loadGameProgress(), progress);
+  assert.deepEqual(adapter.loadGameProgress(), {
+    version: 1,
+    snapshot: {
+      round: 4
+    }
+  });
 
   adapter.clearGameProgress();
   assert.equal(adapter.loadGameProgress(), null);

@@ -465,6 +465,35 @@ test("storage adapter persists and loads skin ownership", () => {
   assert.deepEqual(adapter.loadSkins(), skins);
 });
 
+test("storage adapter strips skins from saved game progress", () => {
+  const storage = createMemoryStorage();
+  const adapter = createStorageAdapter(storage);
+
+  adapter.saveGameProgress({
+    version: 1,
+    snapshot: {
+      round: 4,
+      skins: {
+        owned: {
+          brick: ["brick-sun"],
+          ball: ["ball-ice"]
+        },
+        selected: {
+          brick: "brick-sun",
+          ball: "ball-ice"
+        }
+      }
+    }
+  });
+
+  assert.deepEqual(adapter.loadGameProgress(), {
+    version: 1,
+    snapshot: {
+      round: 4
+    }
+  });
+});
+
 test("round resolves after all balls return and applies collected pickups", () => {
   const game = createGameController({
     boardGenerator: createRoundSequence([
@@ -550,11 +579,32 @@ test("progress snapshot omits volatile flight state and restores settled balls",
   assert.equal(snapshot.returnedBalls, 0);
   assert.equal(Object.hasOwn(snapshot, "balls"), false);
   assert.equal(Object.hasOwn(snapshot, "particles"), false);
+  assert.equal(Object.hasOwn(snapshot, "skins"), false);
 
   const restored = createGameController({
+    initialSkins: {
+      owned: {
+        brick: ["brick-coral"],
+        ball: ["ball-gold"]
+      },
+      selected: {
+        brick: "brick-coral",
+        ball: "ball-gold"
+      }
+    },
     boardGenerator: createRoundSequence([{ blocks: [], pickups: [], coins: [] }]),
     audioBus: createSilentAudioBus()
   });
+  snapshot.skins = {
+    owned: {
+      brick: ["brick-sun"],
+      ball: ["ball-ice"]
+    },
+    selected: {
+      brick: "brick-sun",
+      ball: "ball-ice"
+    }
+  };
 
   assert.equal(restored.importSnapshot(snapshot), true);
   assert.equal(restored.getState().state, "aiming");
@@ -562,6 +612,16 @@ test("progress snapshot omits volatile flight state and restores settled balls",
   assert.equal(restored.getState().balls.length, 3);
   assert.equal(restored.getState().ballsLaunched, 0);
   assert.equal(restored.getState().returnedBalls, 0);
+  assert.deepEqual(restored.getState().skins, {
+    owned: {
+      brick: ["brick-coral"],
+      ball: ["ball-gold"]
+    },
+    selected: {
+      brick: "brick-coral",
+      ball: "ball-gold"
+    }
+  });
 });
 
 test("freeze suppresses exactly one board advance and new row", () => {
