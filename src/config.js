@@ -44,10 +44,10 @@ export const GAME_CONFIG = {
   },
   skins: {
     brick: [
-      { id: "brick-default", name: "经典砖块", color: "#c8e0ff", price: 0, default: true },
+      { id: "brick-default", name: "经典砖", color: "#c8e0ff", price: 0, default: true },
       {
         id: "brick-green-cyclops",
-        name: "碧眼怪砖",
+        name: "碧眼怪",
         color: "#8bd13a",
         accent: "#f8f8f2",
         shape: "rounded",
@@ -60,7 +60,7 @@ export const GAME_CONFIG = {
       },
       {
         id: "brick-orange-grin",
-        name: "橙牙怪砖",
+        name: "橙牙怪",
         color: "#ff9a3d",
         shape: "rounded",
         borderless: true,
@@ -72,7 +72,7 @@ export const GAME_CONFIG = {
       },
       {
         id: "brick-blue-blush",
-        name: "\u84dd\u8138\u840c\u7816",
+        name: "蓝脸萌",
         color: "#63c7ed",
         shape: "rounded",
         borderless: true,
@@ -84,7 +84,7 @@ export const GAME_CONFIG = {
       },
       {
         id: "brick-burgundy-chomp",
-        name: "\u6697\u7ea2\u54ac\u54ac\u7816",
+        name: "南瓜魔",
         color: "#3f0608",
         shape: "rounded",
         borderless: true,
@@ -96,7 +96,7 @@ export const GAME_CONFIG = {
       },
       {
         id: "brick-brown-fang",
-        name: "\u68d5\u7259\u5c0f\u602a\u7816",
+        name: "棕牙怪",
         color: "#8a5638",
         shape: "rounded",
         borderless: true,
@@ -108,7 +108,7 @@ export const GAME_CONFIG = {
       },
       {
         id: "brick-pink-bangs",
-        name: "\u7c89\u53d1\u5c0f\u8138\u7816",
+        name: "粉刘海",
         color: "#ff5368",
         shape: "rounded",
         borderless: true,
