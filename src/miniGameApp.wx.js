@@ -444,8 +444,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   const trophyIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/trophy.png");
   const confettiIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/confetti.png");
   const dailyRewardsIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/gift-box.png");
-  const clearLinesIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/clear-lines.png");
+  const clearLinesIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/clear-lines-item.png");
   const bombItemIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/bomb-item.png");
+  const bombPlaceIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/bomb-place-item.png");
   const freezeItemIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/freeze-item.png");
   const rageItemIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/rage-item.png");
   const adVideoIconAsset = loadImageAsset(wxApi, canvas, "src/assets/pic/ad-video.png");
@@ -4741,7 +4742,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     const disabled = !itemsCanActivate() ||
       clearUsesThisRun >= CLEAR_TOOL_MAX_USES_PER_RUN;
     context.save();
-    const iconSize = button.width * 0.9;
+    const iconSize = button.width;
     const iconX = button.x + (button.width - iconSize) / 2;
     const iconY = button.y + (button.height - iconSize) / 2;
     context.globalAlpha = disabled ? 0.45 : 1;
@@ -4779,7 +4780,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     const count = bombToolInventoryCount();
     const disabled = !itemsCanActivate() || bombUsesThisRun >= BOMB_MAX_USES_PER_RUN;
-    const iconSize = button.width * 0.9;
+    const iconSize = button.width;
     const iconX = button.x + (button.width - iconSize) / 2;
     const iconY = button.y + (button.height - iconSize) / 2;
     context.save();
@@ -4813,6 +4814,15 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     context.restore();
   }
 
+  function drawBombPlaceIcon(context, x, y, size) {
+    const asset = bombPlaceIconAsset.loaded && bombPlaceIconAsset.image
+      ? bombPlaceIconAsset
+      : bombItemIconAsset;
+    if (asset.loaded && asset.image) {
+      context.drawImage(asset.image, x, y, size, size);
+    }
+  }
+
   function drawFreezeToolButton(context, rect) {
     if (overlay !== null || game.getState().state === "gameover") {
       return;
@@ -4823,7 +4833,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     const disabled = !itemsCanActivate() ||
       game.getState().freezeActive ||
       freezeUsesThisRun >= FREEZE_MAX_USES_PER_RUN;
-    const iconSize = button.width * 0.9;
+    const iconSize = button.width;
     const iconX = button.x + (button.width - iconSize) / 2;
     const iconY = button.y + (button.height - iconSize) / 2;
     context.save();
@@ -4853,7 +4863,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       state.rageArmed ||
       state.rageVolleyActive ||
       rageUsesThisRun >= RAGE_MAX_USES_PER_RUN;
-    const iconSize = button.width * 0.94;
+    const iconSize = button.width;
     const iconX = button.x + (button.width - iconSize) / 2;
     const iconY = button.y + (button.height - iconSize) / 2;
     context.save();
@@ -4971,9 +4981,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     const y = bombDrag.point.y - size * 0.82;
     context.save();
     context.globalAlpha = bombDrag.valid ? 1 : 0.42;
-    if (bombItemIconAsset.loaded && bombItemIconAsset.image) {
-      context.drawImage(bombItemIconAsset.image, x, y, size, size);
-    }
+    drawBombPlaceIcon(context, x, y, size);
     context.restore();
   }
 
@@ -5071,16 +5079,10 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     context.save();
     drawBombArea(context, rect, bombAnimation.cell, true, Math.max(0, 1 - progress * 1.5));
-    if (progress < 0.2 && bombItemIconAsset.loaded && bombItemIconAsset.image) {
+    if (progress < 0.2) {
       const bombScale = 1 + Math.sin((progress / 0.2) * Math.PI) * 0.24;
       const bombSize = centerCell.width * 0.72 * bombScale;
-      context.drawImage(
-        bombItemIconAsset.image,
-        centerX - bombSize / 2,
-        centerY - bombSize / 2,
-        bombSize,
-        bombSize
-      );
+      drawBombPlaceIcon(context, centerX - bombSize / 2, centerY - bombSize / 2, bombSize);
     }
     context.beginPath();
     context.arc(centerX, centerY, lerp(8, centerCell.width * 2.1, shock), 0, Math.PI * 2);
@@ -5676,9 +5678,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       }
       context.setLineDash([]);
     }
-    if (explosionProgress < 0.18 && bombItemIconAsset.loaded && bombItemIconAsset.image) {
+    if (explosionProgress < 0.18) {
       const size = cellSize * 0.95;
-      context.drawImage(bombItemIconAsset.image, bombX - size / 2, bombY - size / 2, size, size);
+      drawBombPlaceIcon(context, bombX - size / 2, bombY - size / 2, size, size);
     }
     if (explosionProgress > 0 && explosionProgress < 1) {
       const shock = easeOutCubic(explosionProgress);
