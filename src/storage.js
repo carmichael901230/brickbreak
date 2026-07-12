@@ -141,6 +141,22 @@ export function createStorageAdapter(storage = globalThis.localStorage) {
       storage.setItem(STORAGE_KEYS.skins, JSON.stringify(normalizeSkins(skins)));
     },
 
+    loadViewedNewSkins() {
+      if (!storage) {
+        return [];
+      }
+
+      return normalizeStringList(safeParse(storage.getItem(STORAGE_KEYS.viewedNewSkins), []));
+    },
+
+    saveViewedNewSkins(skinIds) {
+      if (!storage) {
+        return;
+      }
+
+      storage.setItem(STORAGE_KEYS.viewedNewSkins, JSON.stringify(normalizeStringList(skinIds)));
+    },
+
     loadGameProgress() {
       if (!storage) {
         return null;

@@ -267,6 +267,7 @@ input {
 }
 
 .shop-button {
+  position: relative;
   width: 100%;
   margin-top: 22px;
   appearance: none;
@@ -278,6 +279,35 @@ input {
   color: #f8fbff;
   background: linear-gradient(135deg, #2f80ed, #1d4ed8);
   box-shadow: 0 14px 30px rgba(29, 78, 216, 0.26);
+}
+
+.shop-button.has-new-skin::before {
+  content: "皮肤上新啦";
+  position: absolute;
+  right: 14px;
+  top: -38px;
+  z-index: 1;
+  padding: 7px 11px;
+  border-radius: 9px;
+  color: #ffffff;
+  background: #ef4444;
+  box-shadow: 0 8px 18px rgba(239, 68, 68, 0.34);
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.shop-button.has-new-skin::after {
+  content: "";
+  position: absolute;
+  right: 42px;
+  top: -10px;
+  width: 13px;
+  height: 13px;
+  background: #ef4444;
+  transform: skew(-18deg) rotate(-32deg);
+  box-shadow: -3px 5px 9px rgba(239, 68, 68, 0.16);
 }
 
 .speed-button {
@@ -445,6 +475,7 @@ canvas {
 }
 
 .skin-item {
+  position: relative;
   min-height: 158px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
@@ -454,6 +485,34 @@ canvas {
   align-content: center;
   gap: 9px;
   background: rgba(255, 255, 255, 0.06);
+}
+
+.skin-item.is-new {
+  border-color: rgba(250, 204, 21, 0.78);
+  background:
+    radial-gradient(circle at 50% 18%, rgba(250, 204, 21, 0.22), transparent 42%),
+    rgba(255, 255, 255, 0.07);
+  box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.22), 0 0 18px rgba(250, 204, 21, 0.28);
+}
+
+.skin-item.is-new::before {
+  content: attr(data-badge);
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  z-index: 2;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: #1d1d1d;
+  background: #facc15;
+  box-shadow: 0 0 12px rgba(250, 204, 21, 0.46);
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1;
 }
 
 .skin-sample {
@@ -468,6 +527,14 @@ canvas {
 
 .skin-sample.brick {
   border: 2px solid rgba(255, 255, 255, 0.18);
+}
+
+.skin-sample.brick[data-shape="rounded"] {
+  border-radius: 14%;
+}
+
+.skin-sample.brick[data-borderless="true"] {
+  border-color: transparent;
 }
 
 .skin-sample.brick::before,
