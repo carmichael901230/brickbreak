@@ -496,6 +496,10 @@ export function createGameController({
     }
 
     const includeVolatile = options.includeVolatile !== false;
+    if (!includeVolatile && gameState.state !== "aiming") {
+      return null;
+    }
+
     const state = includeVolatile || gameState.state === "aiming" ? gameState.state : "aiming";
     const snapshot = {
       round: gameState.round,

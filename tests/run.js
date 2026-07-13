@@ -567,11 +567,6 @@ test("progress snapshot omits volatile flight state and restores settled balls",
   state.balls = Array.from({ length: 3 }, () => ({ ...state.balls[0] }));
   state.particles = [{ x: 10, y: 20, vx: 1, vy: 2, life: 1, maxLife: 1, tone: "hit" }];
 
-  game.startAim({ x: 360, y: 800 });
-  game.updateAim({ x: 500, y: 300 });
-  game.releaseAim({ x: 500, y: 300 });
-  game.update(0.016);
-
   const snapshot = game.exportSnapshot({ includeVolatile: false });
   assert.equal(snapshot.state, "aiming");
   assert.equal(snapshot.ballsOwned, 3);
@@ -580,6 +575,15 @@ test("progress snapshot omits volatile flight state and restores settled balls",
   assert.equal(Object.hasOwn(snapshot, "balls"), false);
   assert.equal(Object.hasOwn(snapshot, "particles"), false);
   assert.equal(Object.hasOwn(snapshot, "skins"), false);
+
+  game.startAim({ x: 360, y: 800 });
+  game.updateAim({ x: 220, y: 920 });
+  game.releaseAim({ x: 220, y: 920 });
+  game.update(0.016);
+
+  assert.equal(game.exportSnapshot({ includeVolatile: false }), null);
+  state.state = "resolving";
+  assert.equal(game.exportSnapshot({ includeVolatile: false }), null);
 
   const restored = createGameController({
     initialSkins: {

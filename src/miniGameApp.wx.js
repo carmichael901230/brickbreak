@@ -7556,10 +7556,13 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     if (pointerActive) {
       pointerActive = false;
-      const stateBeforeRelease = game.getState();
+      const stateBeforeRelease = game.getState().state;
+      if (stateBeforeRelease === "aiming") {
+        persistProgress(true);
+      }
       game.releaseAim(toGamePoint(point));
       const stateAfterRelease = game.getState();
-      if (stateBeforeRelease.state === "aiming" && stateAfterRelease.state !== "aiming") {
+      if (stateBeforeRelease === "aiming" && stateAfterRelease.state !== "aiming") {
         tutorialDismissed = true;
       }
     }
