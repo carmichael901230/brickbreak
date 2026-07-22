@@ -5,6 +5,7 @@ import { GAME_CONFIG } from "./config.js";
 import { createGameController } from "./gameState.js";
 import { createLeaderboard, FAKE_LEADERBOARD_USERS, LEADERBOARD_BOARD_TYPES } from "./leaderboard.js";
 import { createRenderer } from "./render.js";
+import { resolveBrickFillColor, resolveRainbowSequenceColor } from "./skinColors.js";
 import { createWeChatStorageAdapter } from "./storage.js";
 
 const texts = {
@@ -22,6 +23,10 @@ const texts = {
   selected: "已选择",
   use: "使用",
   coinsShort: "金币不足",
+  watchAdUnlock: "看广告解锁",
+  shopAdLoading: "广告加载中",
+  shopAdFailed: "广告暂时不可用，请稍后再试",
+  shopAdRewarded: "已免费获得皮肤",
   best: "最高分",
   round: "回合",
   paused: "已暂停",
@@ -145,35 +150,6 @@ const POPUP_TITLE_FONT_FAMILY = '"YouYuan", "幼圆", "PingFang SC", "Microsoft 
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
-}
-
-function parseHexColor(color) {
-  if (typeof color !== "string" || !color.startsWith("#")) {
-    return null;
-  }
-
-  const normalized = color.length === 4
-    ? color.slice(1).split("").map((char) => char + char).join("")
-    : color.slice(1);
-  if (!/^[0-9a-f]{6}$/i.test(normalized)) {
-    return null;
-  }
-
-  return {
-    r: Number.parseInt(normalized.slice(0, 2), 16),
-    g: Number.parseInt(normalized.slice(2, 4), 16),
-    b: Number.parseInt(normalized.slice(4, 6), 16)
-  };
-}
-
-function darkenParsedSkinColor(rgb, lifeRatio) {
-  const shade = 0.36 + clamp(lifeRatio, 0, 1) * 0.64;
-  return `rgba(${Math.round(rgb.r * shade)}, ${Math.round(rgb.g * shade)}, ${Math.round(rgb.b * shade)}, 0.92)`;
-}
-
-function darkenSkinColor(color, lifeRatio) {
-  const rgb = parseHexColor(color);
-  return rgb ? darkenParsedSkinColor(rgb, lifeRatio) : color;
 }
 
 function heartContinuePanelRect(rect) {
@@ -685,6 +661,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   let shopMessage = "";
   let shopBannerUntil = 0;
   let shopScrollY = 0;
+  let shopAdLoading = false;
+  let shopAdUnlock = null;
   let shopDragStartY = 0;
   let shopDragStartScrollY = 0;
   let shopDragging = false;
@@ -1884,6 +1862,19 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       return;
     }
 
+    if (purpose === "shop-skin") {
+      shopAdLoading = false;
+      if (completed && shopAdUnlock && grantShopSkin(shopAdUnlock.category, shopAdUnlock.skinId)) {
+        shopMessage = texts.shopAdRewarded;
+        shopAdUnlock = null;
+        closeShopPreview();
+      } else {
+        shopAdUnlock = null;
+        shopMessage = "";
+      }
+      return;
+    }
+
     clearAdLoading = false;
     if (purpose === "clear-tool" && completed) {
       clearAdItemsThisRun += 1;
@@ -1916,6 +1907,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     if (purpose === "rage-tool") {
       rageAdLoading = false;
       rageToolMessage = texts.rageAdFailed;
+      return;
+    }
+    if (purpose === "shop-skin") {
+      shopAdLoading = false;
+      shopAdUnlock = null;
+      shopMessage = texts.shopAdFailed;
       return;
     }
     clearAdLoading = false;
@@ -2236,6 +2233,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     resetRecordConfetti();
     rewardedAdPurpose = null;
     reviveAdLoading = false;
+    shopAdLoading = false;
+    shopAdUnlock = null;
     doubleCoinMessage = "";
     coinDoubleAnimation = null;
     coinCollectAnimations = [];
@@ -2267,6 +2266,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     pointerActive = false;
     bombPlacementArmed = false;
     bombDrag = null;
+    shopAdLoading = false;
+    shopAdUnlock = null;
     tutorialIdleTime = 0;
     resetRecordConfetti();
   }
@@ -2547,9 +2548,23 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     return Boolean(skin?.default) || game.getState().skins.owned[category].includes(skinId);
   }
 
+  function isRewardedAdSkin(skin) {
+    return skin?.unlockMode === "rewardedAd";
+  }
+
+  function hasNewSkinInCategory(category) {
+    return GAME_CONFIG.skins[category].some((skin) => isNewSkinHighlightVisible(category, skin));
+  }
+
   function hasUnownedNewSkin() {
     return Object.entries(GAME_CONFIG.skins).some(([category, skins]) =>
       skins.some((skin) => isNewSkinHighlightVisible(category, skin))
+    );
+  }
+
+  function hasUnseenFreeAdSkin() {
+    return Object.entries(GAME_CONFIG.skins).some(([category, skins]) =>
+      skins.some((skin) => isNewSkinHighlightVisible(category, skin) && isRewardedAdSkin(skin))
     );
   }
 
@@ -2589,6 +2604,49 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     shopPreview = null;
   }
 
+  function grantShopSkin(category, skinId) {
+    const skin = GAME_CONFIG.skins[category].find((candidate) => candidate.id === skinId);
+    if (!skin) {
+      return false;
+    }
+
+    const skins = cloneSerializable(game.getState().skins);
+    if (!skin.default && !skins.owned[category].includes(skin.id)) {
+      skins.owned[category].push(skin.id);
+    }
+    skins.selected[category] = skin.default ? null : skin.id;
+    game.setSkins(skins);
+    syncSkins();
+    shopMessage = texts.selected;
+    return true;
+  }
+
+  function requestShopSkinAd(category, skinId) {
+    if (shopAdLoading || rewardedAdPurpose) {
+      return;
+    }
+
+    if (!rewardedVideoAd) {
+      shopMessage = texts.shopAdFailed;
+      return;
+    }
+
+    shopAdLoading = true;
+    shopAdUnlock = { category, skinId };
+    rewardedAdPurpose = "shop-skin";
+    shopMessage = texts.shopAdLoading;
+    const showAd = () => rewardedVideoAd.show?.();
+    Promise.resolve()
+      .then(showAd)
+      .catch(() => Promise.resolve(rewardedVideoAd.load?.()).then(() => rewardedVideoAd.show?.()))
+      .catch(() => {
+        shopAdLoading = false;
+        shopAdUnlock = null;
+        rewardedAdPurpose = null;
+        shopMessage = texts.shopAdFailed;
+      });
+  }
+
   function handleShopPreviewAction() {
     if (!shopPreview) {
       return;
@@ -2601,11 +2659,13 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     const skins = cloneSerializable(game.getState().skins);
     if (skin.default || skins.owned[category].includes(skin.id)) {
-      skins.selected[category] = skin.default ? null : skin.id;
-      game.setSkins(skins);
-      syncSkins();
-      shopMessage = texts.selected;
+      grantShopSkin(category, skin.id);
       closeShopPreview();
+      return;
+    }
+
+    if (isRewardedAdSkin(skin)) {
+      requestShopSkinAd(category, skin.id);
       return;
     }
 
@@ -2632,6 +2692,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       return;
     }
 
+    markNewSkinViewed(skin);
     const skins = cloneSerializable(game.getState().skins);
     if (skin.default || skins.owned[category].includes(skin.id)) {
       skins.selected[category] = skin.default ? null : skin.id;
@@ -2639,6 +2700,12 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       syncSkins();
       pendingPurchase = null;
       shopMessage = texts.selected;
+      return;
+    }
+
+    if (isRewardedAdSkin(skin)) {
+      pendingPurchase = null;
+      requestShopSkinAd(category, skin.id);
       return;
     }
 
@@ -3177,6 +3244,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         pendingPurchase = null;
         shopPreview = null;
         shopMessage = "";
+        shopAdLoading = false;
+        shopAdUnlock = null;
         shopScrollY = 0;
         break;
       case "shop-tab-ball":
@@ -3184,6 +3253,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         pendingPurchase = null;
         shopPreview = null;
         shopMessage = "";
+        shopAdLoading = false;
+        shopAdUnlock = null;
         shopScrollY = 0;
         break;
       case "shop-done":
@@ -3191,6 +3262,8 @@ export function bootMiniGame(wxApi = globalThis.wx) {
         pendingPurchase = null;
         shopPreview = null;
         shopMessage = "";
+        shopAdLoading = false;
+        shopAdUnlock = null;
         break;
       case "shop-preview-close":
       case "shop-preview-cancel":
@@ -3575,7 +3648,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     if (category === "ball") {
       const storeImage = skin.storeImage ?? skin.image;
       const asset = storeImage ? shopBallSkinAssets[storeImage] : null;
-      if (asset?.loaded && asset.image) {
+      if (skin.colorMode === "rainbowLaunch") {
+        drawRainbowBallSample(context, sampleX, sampleY, sampleSize / 2, skin);
+      } else if (asset?.loaded && asset.image) {
         context.drawImage(
           asset.image,
           sampleX - sampleSize / 2,
@@ -3598,16 +3673,25 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       const badgeX = sampleX + sampleSize / 2 - badgeSize * 0.72;
       const badgeY = Math.max(button.y + 7, sampleY - sampleSize / 2 - badgeSize * 0.28);
       roundedRect(context, badgeX, badgeY, badgeSize, badgeSize, badgeSize / 2);
-      context.fillStyle = "#facc15";
+      context.fillStyle = "#ef4444";
       context.fill();
-      context.fillStyle = "#1d1d1d";
+      context.fillStyle = "#ffffff";
       context.font = "900 14px sans-serif";
       context.textAlign = "center";
       context.textBaseline = "middle";
       context.fillText("新", badgeX + badgeSize / 2, badgeY + badgeSize / 2 + 1);
     }
 
-    const label = selected ? texts.selected : owned ? texts.use : pending ? texts.buy : String(skin.price);
+    const rewardedAdSkin = isRewardedAdSkin(skin);
+    const label = selected
+      ? texts.selected
+      : owned
+        ? texts.use
+        : pending && !rewardedAdSkin
+          ? texts.buy
+          : rewardedAdSkin
+            ? "解锁"
+            : String(skin.price);
     const tagWidth = Math.min(button.width - 18, 76);
     const tagHeight = 26;
     roundedRect(context, sampleX - tagWidth / 2, priceY - tagHeight / 2, tagWidth, tagHeight, tagHeight / 2);
@@ -3624,10 +3708,38 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     context.font = "800 15px sans-serif";
     context.textAlign = "center";
     context.textBaseline = "middle";
-    context.fillText(label, sampleX - (!owned && !pending && coinIconAsset.loaded ? 7 : 0), priceY + 1);
-    if (!owned && !pending && coinIconAsset.loaded && coinIconAsset.image) {
+    if (!owned && !pending && rewardedAdSkin) {
+      const iconSize = 18;
+      const gap = 4;
+      const textWidth = context.measureText(label).width;
+      const totalWidth = iconSize + gap + textWidth;
+      const iconX = sampleX - totalWidth / 2;
+      if (adVideoIconAsset.loaded && adVideoIconAsset.image) {
+        context.drawImage(adVideoIconAsset.image, iconX, priceY - iconSize / 2, iconSize, iconSize);
+      }
+      context.textAlign = "left";
+      context.fillText(label, iconX + iconSize + gap, priceY + 1);
+      return;
+    }
+    context.fillText(label, sampleX - (!owned && !pending && !rewardedAdSkin && coinIconAsset.loaded ? 7 : 0), priceY + 1);
+    if (!owned && !pending && !rewardedAdSkin && coinIconAsset.loaded && coinIconAsset.image) {
       context.drawImage(coinIconAsset.image, sampleX + 14, priceY - 9, 18, 18);
     }
+  }
+
+  function drawRainbowBallSample(context, centerX, centerY, radius, skin) {
+    const colors = skin.rainbowColors?.length ? skin.rainbowColors : [skin.color ?? "#ef4444"];
+    const gradient = context.createLinearGradient(centerX - radius, centerY - radius, centerX + radius, centerY + radius);
+    colors.forEach((color, index) => {
+      gradient.addColorStop(colors.length === 1 ? 0 : index / (colors.length - 1), color);
+    });
+
+    context.save();
+    context.beginPath();
+    context.arc(centerX, centerY, radius, 0, Math.PI * 2);
+    context.fillStyle = gradient;
+    context.fill();
+    context.restore();
   }
 
   function drawBrickSample(context, x, y, size, skin, options = {}) {
@@ -3637,7 +3749,16 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     const lifeRatio = options.lifeRatio ?? 1;
 
     context.save();
-    context.fillStyle = options.fill ?? skin.color;
+    if (!options.fill && skin.colorMode === "rainbowHp") {
+      const rainbow = context.createLinearGradient(x, y, x + size, y + size);
+      const colors = skin.rainbowColors?.length ? skin.rainbowColors : [skin.color];
+      colors.forEach((color, index) => {
+        rainbow.addColorStop(colors.length === 1 ? 0 : index / (colors.length - 1), color);
+      });
+      context.fillStyle = rainbow;
+    } else {
+      context.fillStyle = options.fill ?? resolveBrickFillColor(skin, lifeRatio);
+    }
     context.beginPath();
     if (skin.shape === "rounded") {
       roundedRect(context, x, y, size, size, size * 0.14);
@@ -3796,8 +3917,11 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     context.save();
     context.beginPath();
     context.arc(x, y, radius, 0, Math.PI * 2);
-    context.fillStyle = skin?.color ?? "#eff9ff";
-    context.shadowColor = skin?.color ?? "#eff9ff";
+    const fillColor = skin?.colorMode === "rainbowLaunch"
+      ? resolveRainbowSequenceColor(skin.rainbowColors, 0)
+      : skin?.color ?? "#eff9ff";
+    context.fillStyle = fillColor;
+    context.shadowColor = fillColor;
     context.shadowBlur = 10;
     context.fill();
     context.shadowBlur = 0;
@@ -3881,7 +4005,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
   function previewBrickPalette(skin, block) {
     const lifeRatio = Math.max(0, Math.min(1, (block?.hp ?? 1) / Math.max(1, block?.maxHp ?? block?.hp ?? 1)));
-    const palette = [darkenSkinColor(skin.color, lifeRatio)];
+    const palette = [resolveBrickFillColor(skin, lifeRatio)];
     if (skin.accent) {
       palette.push(skin.accent);
     }
@@ -4051,7 +4175,6 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     }
     updateShopBrickPreviewDemo(shopPreview.demo, skin, area);
     const demo = shopPreview.demo;
-    const rgb = parseHexColor(skin.color);
 
     context.save();
     roundedRect(context, area.previewX, area.previewY, area.previewWidth, area.previewHeight, 10);
@@ -4066,9 +4189,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     for (const block of demo.blocks) {
       const lifeRatio = block.hp / Math.max(1, block.maxHp);
-      const fill = rgb
-        ? darkenParsedSkinColor(rgb, lifeRatio)
-        : darkenSkinColor(skin.color, lifeRatio);
+      const fill = resolveBrickFillColor(skin, lifeRatio);
       drawBrickSample(context, block.x, block.y, block.size, skin, { fill, lifeRatio });
       if (block.hitFlash > 0) {
         context.fillStyle = `rgba(255,255,255,${Math.min(0.55, block.hitFlash * 3.2)})`;
@@ -4168,11 +4289,11 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     drawShopBrickPreview(context, skin, popup);
 
     drawButton(context, cancelButton, texts.noThanks);
-    drawShopPreviewActionButton(context, actionButton, owned, skin.price);
+    drawShopPreviewActionButton(context, actionButton, owned, skin);
     context.restore();
   }
 
-  function drawShopPreviewActionButton(context, button, owned, price) {
+  function drawShopPreviewActionButton(context, button, owned, skin) {
     if (!button) {
       return;
     }
@@ -4180,12 +4301,19 @@ export function bootMiniGame(wxApi = globalThis.wx) {
       drawButton(context, button, texts.use, true);
       return;
     }
+    if (isRewardedAdSkin(skin)) {
+      drawButton(context, button, shopAdLoading ? texts.shopAdLoading : "", true);
+      if (!shopAdLoading) {
+        drawAdUnlockButtonContent(context, button);
+      }
+      return;
+    }
 
     drawButton(context, button, "", true);
 
     const iconSize = 20;
     const buyText = texts.buy;
-    const priceText = String(price);
+    const priceText = String(skin.price);
     const textIconGap = 8;
     const priceGap = 5;
     const centerY = button.y + button.height / 2;
@@ -4216,6 +4344,49 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     context.restore();
   }
 
+  function drawAdUnlockButtonContent(context, button) {
+    const iconSize = 24;
+    const gap = 8;
+    const text = texts.watchAdUnlock;
+    const centerY = button.y + button.height / 2;
+
+    context.save();
+    context.fillStyle = "#1d1d1d";
+    context.font = "800 19px sans-serif";
+    context.textBaseline = "middle";
+    context.textAlign = "left";
+    const textWidth = context.measureText(text).width;
+    const totalWidth = iconSize + gap + textWidth;
+    let cursorX = button.x + (button.width - totalWidth) / 2;
+    if (adVideoIconAsset.loaded && adVideoIconAsset.image) {
+      context.drawImage(adVideoIconAsset.image, cursorX, centerY - iconSize / 2, iconSize, iconSize);
+    }
+    cursorX += iconSize + gap;
+    context.fillText(text, cursorX, centerY + 1);
+    context.restore();
+  }
+
+  function drawShopTabNewBadge(context, button) {
+    if (!button) {
+      return;
+    }
+
+    const badgeWidth = 28;
+    const badgeHeight = 22;
+    const badgeX = button.x + button.width - badgeWidth - 10;
+    const badgeY = button.y - 8;
+    context.save();
+    roundedRect(context, badgeX, badgeY, badgeWidth, badgeHeight, badgeHeight / 2);
+    context.fillStyle = "#ef4444";
+    context.fill();
+    context.fillStyle = "#ffffff";
+    context.font = "900 13px sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText("新", badgeX + badgeWidth / 2, badgeY + badgeHeight / 2 + 1);
+    context.restore();
+  }
+
   function drawShopOverlay(context, rect) {
     const layout = shopLayout();
     const panel = layout.panel;
@@ -4240,8 +4411,16 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     context.stroke();
     context.restore();
 
-    drawButton(context, currentButtons().find((button) => button.id === "shop-tab-brick"), texts.brickSkins, shopCategory === "brick");
-    drawButton(context, currentButtons().find((button) => button.id === "shop-tab-ball"), texts.ballSkins, shopCategory === "ball");
+    const brickTab = currentButtons().find((button) => button.id === "shop-tab-brick");
+    const ballTab = currentButtons().find((button) => button.id === "shop-tab-ball");
+    drawButton(context, brickTab, texts.brickSkins, shopCategory === "brick");
+    drawButton(context, ballTab, texts.ballSkins, shopCategory === "ball");
+    if (hasNewSkinInCategory("brick")) {
+      drawShopTabNewBadge(context, brickTab);
+    }
+    if (hasNewSkinInCategory("ball")) {
+      drawShopTabNewBadge(context, ballTab);
+    }
 
     if (Date.now() < shopBannerUntil) {
       const bannerWidth = 142;
@@ -4411,7 +4590,9 @@ export function bootMiniGame(wxApi = globalThis.wx) {
   }
 
   function drawShopNewCallout(context, button) {
-    const text = "皮肤上新啦";
+    const isFreeSkinCallout = hasUnseenFreeAdSkin();
+    const text = isFreeSkinCallout ? "免费皮肤" : "皮肤上新啦";
+    const fill = isFreeSkinCallout ? "#16a34a" : "#ef4444";
     const centerX = button.x + button.width / 2;
     const bubbleWidth = clamp(button.width * 0.86, 92, 116);
     const bubbleHeight = 30;
@@ -4422,7 +4603,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
 
     context.save();
     roundedRect(context, bubbleX, bubbleY, bubbleWidth, bubbleHeight, 8);
-    context.fillStyle = "#ef4444";
+    context.fillStyle = fill;
     context.fill();
 
     context.beginPath();
@@ -4430,7 +4611,7 @@ export function bootMiniGame(wxApi = globalThis.wx) {
     context.lineTo(tailX + 14, tailY);
     context.lineTo(tailX - 4, tailY + 12);
     context.closePath();
-    context.fillStyle = "#ef4444";
+    context.fillStyle = fill;
     context.fill();
 
     context.fillStyle = "#ffffff";

@@ -1,5 +1,6 @@
 import { GAME_CONFIG } from "./config.js";
 import { clampLaunchDirection, reflectBall, resolveBallBlockCollision } from "./physics.js";
+import { resolveBrickFillColor, resolveRainbowSequenceColor, rgbaFromHex } from "./skinColors.js";
 
 function limitVectorLength(vector, maxLength) {
   const length = Math.hypot(vector.x, vector.y);
@@ -125,6 +126,7 @@ function createBall(launcherX, launcherY) {
     y: launcherY,
     vx: 0,
     vy: 0,
+    skinColor: null,
     active: false,
     returned: false,
     returnSlide: null
@@ -182,42 +184,6 @@ function normalizeSkins(skins, config = GAME_CONFIG) {
       ball: selectedBall
     }
   };
-}
-
-function parseHexColor(color) {
-  const normalized = color?.replace("#", "");
-  if (!normalized || !/^[\da-f]{6}$/i.test(normalized)) {
-    return null;
-  }
-
-  return {
-    r: Number.parseInt(normalized.slice(0, 2), 16),
-    g: Number.parseInt(normalized.slice(2, 4), 16),
-    b: Number.parseInt(normalized.slice(4, 6), 16)
-  };
-}
-
-function rgbaFromHex(color, alpha = 1) {
-  const rgb = parseHexColor(color);
-  if (!rgb) {
-    return color;
-  }
-
-  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
-}
-
-function darkenSkinColor(color, lifeRatio) {
-  const rgb = parseHexColor(color);
-  if (!rgb) {
-    return color;
-  }
-
-  const shade = 0.36 + Math.max(0, Math.min(1, lifeRatio)) * 0.64;
-  return `rgba(${Math.round(rgb.r * shade)}, ${Math.round(rgb.g * shade)}, ${Math.round(rgb.b * shade)}, 0.92)`;
-}
-
-function mixChannel(start, end, progress) {
-  return Math.round(start + (end - start) * progress);
 }
 
 function restoreNumber(value, fallback) {
@@ -335,6 +301,17 @@ export function createGameController({
         : null,
       launchVector
     };
+  }
+
+  function selectedBallSkin() {
+    return config.skins?.ball?.find((skin) => skin.id === gameState.skins?.selected?.ball) ?? null;
+  }
+
+  function rainbowLaunchBallColor(index) {
+    const skin = selectedBallSkin();
+    return skin?.colorMode === "rainbowLaunch"
+      ? resolveRainbowSequenceColor(skin.rainbowColors, index)
+      : null;
   }
 
   function resetRoundEntities() {
@@ -665,6 +642,9 @@ export function createGameController({
       gameState.rageArmed = false;
       gameState.rageVolleyActive = true;
     }
+    for (const ball of gameState.balls) {
+      ball.skinColor = null;
+    }
     gameState.state = "launching";
     gameState.launchCooldown = 0;
     gameState.volleyElapsed = 0;
@@ -682,6 +662,7 @@ export function createGameController({
     const ball = gameState.balls[gameState.ballsLaunched];
     ball.active = true;
     ball.returned = false;
+    ball.skinColor = rainbowLaunchBallColor(gameState.ballsLaunched);
     ball.x = gameState.launcherX;
     ball.y = gameState.arena.launcherY;
     const speed = config.ballSpeed * gameState.speedMultiplier;
@@ -710,8 +691,8 @@ export function createGameController({
   function blockBreakPalette(block) {
     const lifeRatio = Math.max(0, Math.min(1, (block?.hp ?? 1) / Math.max(1, block?.maxHp ?? block?.hp ?? 1)));
     const brickSkin = config.skins?.brick?.find((skin) => skin.id === gameState.skins?.selected?.brick);
-    if (brickSkin?.color) {
-      const palette = [darkenSkinColor(brickSkin.color, lifeRatio)];
+    if (brickSkin) {
+      const palette = [resolveBrickFillColor(brickSkin, lifeRatio)];
       if (brickSkin.accent) {
         palette.push(rgbaFromHex(brickSkin.accent, 0.82));
       }
@@ -719,7 +700,7 @@ export function createGameController({
     }
 
     return [
-      `rgba(${mixChannel(74, 200, lifeRatio)}, ${mixChannel(102, 224, lifeRatio)}, ${mixChannel(132, 255, lifeRatio)}, 0.92)`,
+      resolveBrickFillColor(null, lifeRatio),
       "rgba(238,248,255,0.82)"
     ];
   }

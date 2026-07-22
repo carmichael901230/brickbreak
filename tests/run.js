@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import { createBoardGenerator } from "../src/board.js";
 import { resolveDailyCheckIn } from "../src/checkIn.js";
@@ -6,6 +7,11 @@ import { GAME_CONFIG } from "../src/config.js";
 import { createGameController } from "../src/gameState.js";
 import { createLeaderboard, maskWeChatName } from "../src/leaderboard.js";
 import { clampLaunchDirection, reflectBall, resolveBallBlockCollision } from "../src/physics.js";
+import {
+  brickShopSampleBackground,
+  resolveRainbowHpColor,
+  resolveRainbowSequenceColor
+} from "../src/skinColors.js";
 import { createStorageAdapter } from "../src/storage.js";
 import { createAudioBus as createRealAudioBus } from "../src/audio.js";
 
@@ -72,6 +78,49 @@ test("audio bus dispatches gameplay events while sound is disabled", () => {
 
   assert.deepEqual(events, [{ type: "coin", payload: { coins: 3 } }]);
   assert.equal(audioBus.isEnabled(), false);
+});
+
+test("rainbow HP skin maps full health to red and low health to violet", () => {
+  const colors = GAME_CONFIG.skins.brick.find((skin) => skin.id === "brick-rainbow").rainbowColors;
+
+  assert.equal(resolveRainbowHpColor(colors, 1), "rgba(239, 68, 68, 0.92)");
+  assert.equal(resolveRainbowHpColor(colors, 0.5), "rgba(34, 197, 94, 0.92)");
+  assert.equal(resolveRainbowHpColor(colors, 0), "rgba(139, 92, 246, 0.92)");
+});
+
+test("rainbow HP skin uses a gradient browser shop sample", () => {
+  const skin = GAME_CONFIG.skins.brick.find((candidate) => candidate.id === "brick-rainbow");
+
+  assert.equal(GAME_CONFIG.skins.brick[0].id, "brick-default");
+  assert.equal(GAME_CONFIG.skins.brick[1].id, "brick-rainbow");
+  assert.equal(skin.isNew, true);
+  assert.equal(skin.unlockMode, "rewardedAd");
+  assert.equal(skin.price, 0);
+  assert.match(brickShopSampleBackground(skin), /^linear-gradient\(135deg, #ef4444/);
+});
+
+test("rainbow ball skin is a new rewarded-ad skin after default", () => {
+  const skin = GAME_CONFIG.skins.ball.find((candidate) => candidate.id === "ball-rainbow");
+
+  assert.equal(GAME_CONFIG.skins.ball[0].id, "ball-default");
+  assert.equal(GAME_CONFIG.skins.ball[1].id, "ball-rainbow");
+  assert.equal(skin.isNew, true);
+  assert.equal(skin.unlockMode, "rewardedAd");
+  assert.equal(skin.price, 0);
+  assert.equal(skin.colorMode, "rainbowLaunch");
+  assert.equal(resolveRainbowSequenceColor(skin.rainbowColors, 0), "#ef4444");
+  assert.equal(resolveRainbowSequenceColor(skin.rainbowColors, 7), "#ef4444");
+  assert.match(brickShopSampleBackground(skin), /^linear-gradient\(135deg, #ef4444/);
+});
+
+test("shop new-skin callout distinguishes free ad skins from regular new skins", () => {
+  const styles = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
+
+  assert.match(styles, /content: "皮肤上新啦"/);
+  assert.match(styles, /content: "免费皮肤"/);
+  assert.match(styles, /background: #ef4444/);
+  assert.match(styles, /background: #16a34a/);
+  assert.match(styles, /\.skin-item\.is-new::before[\s\S]*color: #ffffff/);
 });
 
 test("reflectBall bounces off arena walls and ceiling", () => {
@@ -1181,6 +1230,75 @@ test("releaseAim fires opposite to the drag direction", () => {
   const state = game.getState();
   assert.ok(state.launchDirection.x > 0);
   assert.ok(state.launchDirection.y < 0);
+});
+
+test("rainbow launch ball colors advance per emitted ball and reset each volley", () => {
+  const customConfig = {
+    ...GAME_CONFIG,
+    ballSpeed: 100,
+    launchInterval: 0.01,
+    settleThreshold: 5000,
+    height: 5200
+  };
+  const game = createGameController({
+    config: customConfig,
+    initialSkins: {
+      owned: { brick: [], ball: ["ball-rainbow"] },
+      selected: { brick: null, ball: "ball-rainbow" }
+    },
+    boardGenerator: createRoundSequence([
+      { blocks: [], pickups: [] },
+      { blocks: [], pickups: [] }
+    ]),
+    audioBus: createSilentAudioBus()
+  });
+  const state = game.getState();
+  const baseBall = state.balls[0];
+  state.ballsOwned = 3;
+  state.balls = Array.from({ length: state.ballsOwned }, () => ({
+    ...baseBall,
+    active: false,
+    returned: false,
+    returnSlide: null,
+    skinColor: null,
+    x: state.launcherX,
+    y: state.arena.launcherY,
+    vx: 0,
+    vy: 0
+  }));
+
+  game.startAim({ x: 360, y: 800 });
+  game.updateAim({ x: 300, y: 960 });
+  game.releaseAim({ x: 300, y: 960 });
+  game.update(0.001);
+  game.update(0.011);
+  game.update(0.011);
+
+  assert.deepEqual(state.balls.map((ball) => ball.skinColor), ["#ef4444", "#f97316", "#facc15"]);
+
+  state.state = "aiming";
+  state.ballsLaunched = 0;
+  state.returnedBalls = 0;
+  state.firstReturnX = null;
+  state.balls = Array.from({ length: state.ballsOwned }, () => ({
+    ...baseBall,
+    active: false,
+    returned: false,
+    returnSlide: null,
+    skinColor: "#8b5cf6",
+    x: state.launcherX,
+    y: state.arena.launcherY,
+    vx: 0,
+    vy: 0
+  }));
+
+  game.startAim({ x: 360, y: 800 });
+  game.updateAim({ x: 300, y: 960 });
+  game.releaseAim({ x: 300, y: 960 });
+  game.update(0.001);
+
+  assert.equal(state.balls[0].skinColor, "#ef4444");
+  assert.equal(state.balls[1].skinColor, null);
 });
 
 test("dragging downward hides the guide and cancels the shot", () => {

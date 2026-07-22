@@ -5,6 +5,7 @@ import { DAILY_CHECK_IN_REWARDS, formatLocalDate, resolveDailyCheckIn } from "./
 import { createGameController } from "./gameState.js";
 import { createInputController } from "./input.js";
 import { createRenderer } from "./render.js";
+import { brickShopSampleBackground } from "./skinColors.js";
 import { createStorageAdapter } from "./storage.js";
 
 const mainMenu = document.querySelector("#mainMenu");
@@ -195,6 +196,7 @@ function syncHud() {
   heartCounter.classList.toggle("is-hidden", appScreen !== "game");
   menuHeartCounter.classList.toggle("is-hidden", appScreen !== "menu");
   shopButton.classList.toggle("has-new-skin", hasUnownedNewSkin());
+  shopButton.classList.toggle("has-free-skin", hasUnseenFreeAdSkin());
   speedButton.classList.toggle("is-hidden", !state.speedUpAvailable || isSimulationPaused());
   gameOverSummary.textContent = `You made it to round ${state.round}.`;
 }
@@ -357,8 +359,22 @@ function hasUnownedNewSkin() {
   );
 }
 
+function hasUnseenFreeAdSkin() {
+  return Object.entries(GAME_CONFIG.skins).some(([category, skins]) =>
+    skins.some((skin) => isNewSkinHighlightVisible(category, skin) && isRewardedAdSkin(skin))
+  );
+}
+
 function isNewSkinHighlightVisible(category, skin) {
   return Boolean(skin.isNew && !skin.default && !viewedNewSkinIds.has(skin.id) && !isOwned(category, skin.id));
+}
+
+function hasNewSkinInCategory(category) {
+  return GAME_CONFIG.skins[category].some((skin) => isNewSkinHighlightVisible(category, skin));
+}
+
+function isRewardedAdSkin(skin) {
+  return skin?.unlockMode === "rewardedAd";
 }
 
 function markNewSkinViewed(skin) {
@@ -376,6 +392,8 @@ function renderShop() {
   const skins = GAME_CONFIG.skins[shopCategory];
   brickShopTab.classList.toggle("is-active", shopCategory === "brick");
   ballShopTab.classList.toggle("is-active", shopCategory === "ball");
+  brickShopTab.classList.toggle("has-new-skin", hasNewSkinInCategory("brick"));
+  ballShopTab.classList.toggle("has-new-skin", hasNewSkinInCategory("ball"));
   shopGrid.innerHTML = "";
 
   for (const skin of skins) {
@@ -396,7 +414,9 @@ function renderShop() {
 
     const sample = document.createElement("span");
     sample.className = `skin-sample ${shopCategory}`;
-    sample.style.background = skin.color;
+    sample.style.background = shopCategory === "brick" || skin.colorMode === "rainbowLaunch"
+      ? brickShopSampleBackground(skin)
+      : skin.color;
     sample.style.color = skin.color;
     sample.style.setProperty("--skin-accent", skin.accent ?? "rgba(255,255,255,0.72)");
     if (skin.pattern) {
@@ -423,7 +443,21 @@ function renderShop() {
       action.classList.add("owned");
       action.textContent = "Use";
     } else if (isPending) {
-      action.textContent = "购买";
+      if (isRewardedAdSkin(skin)) {
+        action.classList.add("ad-unlock");
+        const icon = document.createElement("img");
+        icon.src = "./src/assets/pic/ad-video.png";
+        icon.alt = "";
+        action.append(icon, document.createTextNode("看广告解锁"));
+      } else {
+        action.textContent = "购买";
+      }
+    } else if (isRewardedAdSkin(skin)) {
+      action.classList.add("ad-unlock");
+      const icon = document.createElement("img");
+      icon.src = "./src/assets/pic/ad-video.png";
+      icon.alt = "";
+      action.append(icon, document.createTextNode("解锁"));
     } else {
       const icon = document.createElement("img");
       icon.src = "./src/assets/pic/dollar.png";
@@ -484,7 +518,21 @@ function handleSkinTap(skinId) {
 
   if (pendingPurchase?.category !== shopCategory || pendingPurchase.skinId !== skin.id) {
     pendingPurchase = { category: shopCategory, skinId: skin.id };
-    shopMessage.textContent = "Tap 购买 to confirm purchase.";
+    shopMessage.textContent = isRewardedAdSkin(skin)
+      ? "Tap Watch to unlock for free."
+      : "Tap 购买 to confirm purchase.";
+    renderShop();
+    return;
+  }
+
+  if (isRewardedAdSkin(skin)) {
+    skins.owned[shopCategory].push(skin.id);
+    skins.selected[shopCategory] = skin.id;
+    game.setSkins(skins);
+    syncSkins();
+    pendingPurchase = null;
+    shopMessage.textContent = "Ad reward unlocked and equipped.";
+    syncHud();
     renderShop();
     return;
   }

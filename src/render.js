@@ -1,4 +1,9 @@
 import { GAME_CONFIG } from "./config.js";
+import {
+  resolveBrickFillColor,
+  resolveRainbowSequenceColor,
+  rgbaFromHex
+} from "./skinColors.js";
 
 function alphaColor(color, alpha) {
   return `${color}${Math.round(Math.max(0, Math.min(1, alpha)) * 255)
@@ -23,46 +28,6 @@ function getVisibleBrickRect(state, config, x, y) {
     y: y + inset,
     size: state.arena.blockSize - inset * 2
   };
-}
-
-function mixChannel(start, end, progress) {
-  return Math.round(start + (end - start) * progress);
-}
-
-function parseHexColor(color) {
-  const normalized = color?.replace("#", "");
-  if (!normalized || !/^[\da-f]{6}$/i.test(normalized)) {
-    return null;
-  }
-
-  return {
-    r: Number.parseInt(normalized.slice(0, 2), 16),
-    g: Number.parseInt(normalized.slice(2, 4), 16),
-    b: Number.parseInt(normalized.slice(4, 6), 16)
-  };
-}
-
-function darkenSkinColor(color, lifeRatio) {
-  const rgb = parseHexColor(color);
-  if (!rgb) {
-    return color;
-  }
-
-  return darkenParsedSkinColor(rgb, lifeRatio);
-}
-
-function darkenParsedSkinColor(rgb, lifeRatio) {
-  const shade = 0.36 + Math.max(0, Math.min(1, lifeRatio)) * 0.64;
-  return `rgba(${Math.round(rgb.r * shade)}, ${Math.round(rgb.g * shade)}, ${Math.round(rgb.b * shade)}, 0.92)`;
-}
-
-function rgbaFromHex(color, alpha = 1) {
-  const rgb = parseHexColor(color);
-  if (!rgb) {
-    return color;
-  }
-
-  return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
 }
 
 function createImageAsset(src) {
@@ -262,18 +227,12 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
 
   function drawBlocks(state, resolveEntityPosition) {
     const brickSkin = selectedBrickSkin(state, config);
-    const brickSkinColor = brickSkin?.color;
-    const brickSkinRgb = parseHexColor(brickSkinColor);
 
     for (const block of state.blocks) {
       const { x, y } = resolveEntityPosition(block);
       const visibleRect = getVisibleBrickRect(state, config, x, y);
       const lifeRatio = Math.max(0, Math.min(1, block.hp / Math.max(1, block.maxHp ?? block.hp)));
-      const fill = brickSkinRgb
-        ? darkenParsedSkinColor(brickSkinRgb, lifeRatio)
-        : brickSkinColor
-          ? darkenSkinColor(brickSkinColor, lifeRatio)
-        : `rgba(${mixChannel(74, 200, lifeRatio)}, ${mixChannel(102, 224, lifeRatio)}, ${mixChannel(132, 255, lifeRatio)}, 0.92)`;
+      const fill = resolveBrickFillColor(brickSkin, lifeRatio);
       context.save();
       if (block.rowAnimation?.spawn && block.rowAnimation.duration > 0) {
         const progress = 1 - block.rowAnimation.time / block.rowAnimation.duration;
@@ -637,12 +596,17 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
     const ballSkin = selectedBallSkin(state, config);
     const image = ballSkin?.gameImage ?? ballSkin?.image;
     const asset = image ? ballSkinAssets[image] : null;
+    const rainbowLaunch = ballSkin?.colorMode === "rainbowLaunch";
+    const markerColor = rainbowLaunch
+      ? resolveRainbowSequenceColor(ballSkin.rainbowColors, 0)
+      : null;
 
     if (state.firstReturnX !== null && state.state !== "aiming") {
-      drawBallSkin(state.firstReturnX, state.arena.launcherY, config.ballRadius, ballSkin, asset, 12);
+      drawBallSkin(state.firstReturnX, state.arena.launcherY, config.ballRadius, ballSkin, asset, 12, markerColor);
     }
 
-    for (const ball of state.balls) {
+    for (let index = 0; index < state.balls.length; index += 1) {
+      const ball = state.balls[index];
       // Active balls render in-flight; returned balls render only while sliding into the landing marker.
       if (!ball.active && !ball.returnSlide) {
         continue;
@@ -650,11 +614,14 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
 
       context.beginPath();
       context.arc(ball.x, ball.y, config.ballRadius, 0, Math.PI * 2);
-      drawBallSkin(ball.x, ball.y, config.ballRadius, ballSkin, asset, 18);
+      const skinColor = rainbowLaunch
+        ? ball.skinColor ?? resolveRainbowSequenceColor(ballSkin.rainbowColors, index)
+        : null;
+      drawBallSkin(ball.x, ball.y, config.ballRadius, ballSkin, asset, 18, skinColor);
     }
   }
 
-  function drawBallSkin(centerX, centerY, radius, skin, asset, shadowBlur = 0) {
+  function drawBallSkin(centerX, centerY, radius, skin, asset, shadowBlur = 0, colorOverride = null) {
     context.save();
     if (shadowBlur > 0) {
       context.shadowBlur = shadowBlur;
@@ -667,7 +634,7 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
     } else {
       context.beginPath();
       context.arc(centerX, centerY, radius, 0, Math.PI * 2);
-      context.fillStyle = skin?.color ?? "#eff9ff";
+      context.fillStyle = colorOverride ?? skin?.color ?? "#eff9ff";
       context.fill();
     }
 
@@ -760,6 +727,9 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
     const ballSkin = selectedBallSkin(state, config);
     const image = ballSkin?.gameImage ?? ballSkin?.image;
     const asset = image ? ballSkinAssets[image] : null;
+    const launcherColor = ballSkin?.colorMode === "rainbowLaunch"
+      ? resolveRainbowSequenceColor(ballSkin.rainbowColors, state.ballsLaunched)
+      : null;
 
     if (rageVisible || state.rageActivationEffect) {
       const effectProgress = state.rageActivationEffect
@@ -816,7 +786,7 @@ export function createRenderer(canvas, config = GAME_CONFIG, options = {}) {
     context.fill();
     context.beginPath();
     context.arc(state.launcherX, state.arena.launcherY, launcherRadius, 0, Math.PI * 2);
-    drawBallSkin(state.launcherX, state.arena.launcherY, launcherRadius, ballSkin, asset);
+    drawBallSkin(state.launcherX, state.arena.launcherY, launcherRadius, ballSkin, asset, 0, launcherColor);
 
     // Count down queued balls during launch so the volley size reads like remaining ammo.
     context.fillStyle = "#d8f1ff";

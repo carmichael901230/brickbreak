@@ -46,6 +46,16 @@ export const GAME_CONFIG = {
     brick: [
       { id: "brick-default", name: "经典砖", color: "#c8e0ff", price: 0, default: true },
       {
+        id: "brick-rainbow",
+        name: "彩虹砖",
+        color: "#ef4444",
+        colorMode: "rainbowHp",
+        rainbowColors: ["#ef4444", "#f97316", "#facc15", "#22c55e", "#3b82f6", "#4f46e5", "#8b5cf6"],
+        unlockMode: "rewardedAd",
+        isNew: true,
+        price: 0
+      },
+      {
         id: "brick-green-cyclops",
         name: "碧眼怪",
         color: "#8bd13a",
@@ -141,6 +151,16 @@ export const GAME_CONFIG = {
     ],
     ball: [
       { id: "ball-default", name: "经典弹球", color: "#eff9ff", price: 0, default: true },
+      {
+        id: "ball-rainbow",
+        name: "彩虹球",
+        color: "#ef4444",
+        colorMode: "rainbowLaunch",
+        rainbowColors: ["#ef4444", "#f97316", "#facc15", "#22c55e", "#3b82f6", "#4f46e5", "#8b5cf6"],
+        unlockMode: "rewardedAd",
+        isNew: true,
+        price: 0
+      },
       { id: "ball-ice", name: "冰霜球", color: "#eff9ff", price: 20 },
       { id: "ball-gold", name: "金币球", color: "#ffcc80", price: 20 },
       { id: "ball-pink", name: "粉桃球", color: "#ff8fab", price: 20 },
